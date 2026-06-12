@@ -102,9 +102,17 @@ def build_router() -> Router:
         if not bot_db:
             return
 
+        dl_on = await get_module().is_enabled_for(event.bot.id)
+        logger.info(
+            "join request: user=%s chat=%s dl_enabled=%s",
+            event.from_user.id,
+            event.chat.id,
+            dl_on,
+        )
+
         # «Прямая ссылка» включена → вход идёт через Main App по startapp-
         # ссылке, бот в диалоге не вмешивается и заявку не трогает.
-        if await get_module().is_enabled_for(event.bot.id):
+        if dl_on:
             return
 
         # «Прямая ссылка» выключена → бот пишет первым и ведёт в мини-апп.
@@ -123,12 +131,14 @@ def build_router() -> Router:
         target = getattr(event, "user_chat_id", None) or event.from_user.id
         try:
             await event.bot.send_message(target, text, reply_markup=kb)
+            logger.info("join DM sent to %s", target)
         except Exception as e:
             # Если не прошло из-за кнопки — пробуем хотя бы текст без неё.
             logger.warning("join DM failed for %s: %s", target, e)
             if kb is not None:
                 try:
                     await event.bot.send_message(target, text)
+                    logger.info("join DM (no button) sent to %s", target)
                 except Exception as e2:
                     logger.warning("join DM (no button) failed for %s: %s", target, e2)
 
