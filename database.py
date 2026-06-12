@@ -14,6 +14,7 @@
 
 from __future__ import annotations
 
+import json
 import os
 import secrets
 import threading
@@ -168,11 +169,38 @@ def init_db() -> None:
             updated_at     BIGINT NOT NULL
         )
         """,
+        f"""
+        CREATE TABLE IF NOT EXISTS templates (
+            id         {auto_pk},
+            owner_id   BIGINT NOT NULL,
+            name       TEXT NOT NULL,
+            kind       TEXT NOT NULL DEFAULT 'standard',
+            share_code TEXT,
+            content    TEXT NOT NULL DEFAULT '{{}}',
+            created_at BIGINT
+        )
+        """,
     ]
     with _lock:
         for stmt in ddl:
             _db.execute(stmt)
+        # миграции: новые колонки к уже существующим таблицам
+        if not _column_exists("bots", "template_id"):
+            _db.execute("ALTER TABLE bots ADD COLUMN template_id BIGINT")
         _db.commit()
+
+
+def _column_exists(table: str, column: str) -> bool:
+    """Есть ли колонка (для аккуратных миграций без падений на проде)."""
+    if _db.kind == "pg":
+        row = _db.one(
+            "SELECT 1 AS x FROM information_schema.columns "
+            "WHERE table_name=? AND column_name=?",
+            (table, column),
+        )
+        return row is not None
+    rows = _db.all(f"PRAGMA table_info({table})")
+    return any(r["name"] == column for r in rows)
 
 
 # ----------------------------------------------------------------- users
@@ -297,6 +325,120 @@ def delete_bot(bot_id: int) -> None:
                 "DELETE FROM direct_link_bots WHERE bot_id=?", (row["tg_id"],)
             )
         _db.commit()
+
+
+def set_bot_template(bot_id: int, template_id: int | None) -> None:
+    with _lock:
+        _db.execute(
+            "UPDATE bots SET template_id=? WHERE id=?", (template_id, bot_id)
+        )
+        _db.commit()
+
+
+# ----------------------------------------------------------------- templates
+# Шаблоны принадлежат владельцу (owner_id) и общие для всех его ботов:
+# созданный в одном боте шаблон доступен в любом другом. Поля редактора
+# хранятся в JSON-блоке content, чтобы расширять набор без миграций.
+
+
+def _hydrate_template(t: dict | None) -> dict | None:
+    if t is None:
+        return None
+    try:
+        t["content"] = json.loads(t.get("content") or "{}")
+    except (ValueError, TypeError):
+        t["content"] = {}
+    return t
+
+
+def create_template(
+    owner_id: int,
+    name: str,
+    kind: str = "standard",
+    content: dict | None = None,
+) -> int:
+    with _lock:
+        row = _db.one(
+            "INSERT INTO templates(owner_id, name, kind, content, created_at) "
+            "VALUES(?,?,?,?,?) RETURNING id",
+            (owner_id, name, kind, json.dumps(content or {}, ensure_ascii=False), _now()),
+        )
+        _db.commit()
+    return int(row["id"])
+
+
+def get_template(template_id: int) -> dict | None:
+    with _lock:
+        return _hydrate_template(
+            _db.one("SELECT * FROM templates WHERE id=?", (template_id,))
+        )
+
+
+def get_owner_templates(owner_id: int) -> list[dict]:
+    with _lock:
+        rows = _db.all(
+            "SELECT * FROM templates WHERE owner_id=? ORDER BY id", (owner_id,)
+        )
+    return [_hydrate_template(r) for r in rows]
+
+
+def update_template_content(template_id: int, key: str, value: Any) -> None:
+    """Записать одно поле редактора в JSON-content шаблона."""
+    with _lock:
+        row = _db.one("SELECT content FROM templates WHERE id=?", (template_id,))
+        if row is None:
+            return
+        try:
+            content = json.loads(row.get("content") or "{}")
+        except (ValueError, TypeError):
+            content = {}
+        content[key] = value
+        _db.execute(
+            "UPDATE templates SET content=? WHERE id=?",
+            (json.dumps(content, ensure_ascii=False), template_id),
+        )
+        _db.commit()
+
+
+def rename_template(template_id: int, name: str) -> None:
+    with _lock:
+        _db.execute(
+            "UPDATE templates SET name=? WHERE id=?", (name, template_id)
+        )
+        _db.commit()
+
+
+def delete_template(template_id: int) -> None:
+    with _lock:
+        _db.execute(
+            "UPDATE bots SET template_id=NULL WHERE template_id=?", (template_id,)
+        )
+        _db.execute("DELETE FROM templates WHERE id=?", (template_id,))
+        _db.commit()
+
+
+def copy_template(template_id: int) -> int | None:
+    t = get_template(template_id)
+    if t is None:
+        return None
+    return create_template(
+        t["owner_id"], f"{t['name']} (копия)", t["kind"], t["content"]
+    )
+
+
+def set_template_share_code(template_id: int, code: str) -> None:
+    with _lock:
+        _db.execute(
+            "UPDATE templates SET share_code=? WHERE id=?", (code, template_id)
+        )
+        _db.commit()
+
+
+def get_template_by_share_code(code: str) -> dict | None:
+    with _lock:
+        return _hydrate_template(
+            _db.one("SELECT * FROM templates WHERE share_code=?", (code,))
+        )
 
 
 # -------------------------------------------------------------- launches

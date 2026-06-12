@@ -11,8 +11,17 @@ from __future__ import annotations
 from aiogram.types import InlineKeyboardButton, InlineKeyboardMarkup
 from aiogram.utils.keyboard import InlineKeyboardBuilder
 
-from database import direct_link_enabled
+from database import direct_link_enabled, get_template
 from templates import template_name
+
+
+def _bot_template_name(bot: dict) -> str:
+    tid = bot.get("template_id")
+    if tid:
+        t = get_template(tid)
+        if t:
+            return t["name"]
+    return template_name(bot.get("template"))
 
 
 def render_bot_card(bot: dict) -> tuple[str, InlineKeyboardMarkup]:
@@ -22,7 +31,7 @@ def render_bot_card(bot: dict) -> tuple[str, InlineKeyboardMarkup]:
     lines = [
         f"🤖 Бот: <b>{username}</b>",
         f"🔑 Токен: <code>{bot['token']}</code>",
-        f"📋 Шаблон: {template_name(bot.get('template'))}",
+        f"📋 Шаблон: {_bot_template_name(bot)}",
         "",
     ]
     if bot.get("guard_enabled"):
