@@ -36,3 +36,8 @@ RUN_WEB: bool = os.getenv("RUN_WEB", "0") == "1"
 WEB_HOST: str = os.getenv("WEB_HOST", "0.0.0.0")
 # Railway передаёт порт через переменную PORT — берём её в первую очередь.
 WEB_PORT: int = int(os.getenv("PORT", os.getenv("WEB_PORT", "8080")))
+
+# Публичный базовый URL веб-части (HTTPS-домен Railway). Используется,
+# чтобы собрать Web App URL для @BotFather: <BASE>/app/<tg_id>.
+# Пример: https://bot-manager-production.up.railway.app
+MINIAPP_BASE_URL: str = os.getenv("MINIAPP_BASE_URL", "").rstrip("/")

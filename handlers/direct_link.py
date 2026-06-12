@@ -50,13 +50,28 @@ async def _render(callback: CallbackQuery, bot: dict) -> None:
     manual_url = module.config.manual_url
     enabled = state["enabled"]
 
+    from config import MINIAPP_BASE_URL
+
+    if MINIAPP_BASE_URL:
+        webapp_url = f"{MINIAPP_BASE_URL}/app/{tg_id}"
+        webapp_block = (
+            "🌐 Web App URL для @BotFather (Bot Settings → Configure Mini App):\n"
+            f"<code>{webapp_url}</code>\n\n"
+        )
+    else:
+        webapp_block = (
+            "🌐 Web App URL: задайте переменную <code>MINIAPP_BASE_URL</code> "
+            "(HTTPS-домен), чтобы получить ссылку для @BotFather.\n\n"
+        )
+
     text = (
         "🔗 <b>Прямая ссылка</b>\n\n"
         "❓ Для включения необходимо установить через @BotFather мини-апп "
         f'ссылку на бота. Посмотрите <a href="{manual_url}">мануал</a>, как '
         "правильно это сделать. После установки ссылки в ботфазере, прямая "
         "ссылка начнёт работать через 10–15 минут.\n\n"
-        f"🔗 Прямая ссылка на мини-апп:\n{startapp_url}\n\n"
+        f"{webapp_block}"
+        f"🔗 Прямая ссылка на мини-апп (для юзеров):\n{startapp_url}\n\n"
         "✳️ При включении этой функции бот перестанет реагировать на "
         "<code>/start</code> — пользователи смогут зайти только по прямой "
         "ссылке. Без правильной ссылки мини-апп перенаправит их на другой ресурс.\n\n"

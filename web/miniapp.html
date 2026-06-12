@@ -1,0 +1,97 @@
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+  <title>Mini App</title>
+  <script src="https://telegram.org/js/telegram-web-app.js"></script>
+  <style>
+    :root { color-scheme: light dark; }
+    html, body {
+      margin: 0; padding: 0; height: 100%;
+      background: var(--tg-theme-bg-color, #18222d);
+      color: var(--tg-theme-text-color, #fff);
+      font-family: -apple-system, "Segoe UI", Roboto, sans-serif;
+    }
+    #root {
+      min-height: 100%;
+      display: flex; flex-direction: column;
+      align-items: center; justify-content: center;
+      text-align: center; padding: 24px; box-sizing: border-box;
+    }
+    .card { max-width: 420px; }
+    h2 { margin: 0 0 12px; font-size: 22px; }
+    p { margin: 6px 0; opacity: .85; line-height: 1.4; }
+    .muted { font-size: 13px; opacity: .6; }
+    .spinner {
+      width: 28px; height: 28px; border-radius: 50%;
+      border: 3px solid rgba(127,127,127,.3);
+      border-top-color: var(--tg-theme-button-color, #2ea6ff);
+      animation: spin .8s linear infinite; margin: 0 auto 16px;
+    }
+    @keyframes spin { to { transform: rotate(360deg); } }
+  </style>
+</head>
+<body>
+  <div id="root">
+    <div class="card">
+      <div class="spinner"></div>
+      <p>Загрузка…</p>
+    </div>
+  </div>
+
+  <script>
+    const tg = window.Telegram ? window.Telegram.WebApp : null;
+    const BOT_ID = "__BOT_ID__";
+    const root = document.getElementById("root");
+
+    function html(s) { root.innerHTML = '<div class="card">' + s + '</div>'; }
+
+    function renderGranted() {
+      const u = (tg && tg.initDataUnsafe && tg.initDataUnsafe.user) || {};
+      const name = u.first_name ? (" " + u.first_name) : "";
+      html(
+        '<h2>Доступ открыт ✅</h2>' +
+        '<p>Привет' + name + '!</p>' +
+        '<p>Здесь будет ваш шаблон мини-аппа.</p>' +
+        '<p class="muted">Скоро добавим контент по выбранному шаблону.</p>'
+      );
+    }
+
+    function redirect(url) {
+      html('<div class="spinner"></div><p>Перенаправление…</p>');
+      if (url && tg && tg.openTelegramLink) {
+        try { tg.openTelegramLink(url); } catch (e) {}
+      } else if (url) {
+        window.location.href = url;
+      }
+      if (tg && tg.close) setTimeout(() => tg.close(), 300);
+    }
+
+    async function main() {
+      if (!tg) {
+        html('<h2>Откройте в Telegram</h2><p>Эта страница — мини-приложение Telegram.</p>');
+        return;
+      }
+      tg.ready();
+      try { tg.expand(); } catch (e) {}
+
+      try {
+        const r = await fetch("/dl/" + BOT_ID + "/auth/start", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          credentials: "include",
+          body: JSON.stringify({ init_data: tg.initData || "" }),
+        });
+        const data = await r.json();
+        if (data.mode === "granted") renderGranted();
+        else redirect(data.redirect_url);
+      } catch (e) {
+        html('<h2>Ошибка</h2><p class="muted">' + (e && e.message ? e.message : e) + '</p>');
+      }
+    }
+
+    main();
+  </script>
+</body>
+</html>
