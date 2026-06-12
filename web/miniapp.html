@@ -4,7 +4,7 @@
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
   <title> </title>
-  <script src="https://telegram.org/js/telegram-web-app.js"></script>
+  <script async src="https://telegram.org/js/telegram-web-app.js"></script>
   <style>
     :root { color-scheme: dark; }
     /* По умолчанию — чистый чёрный экран без контента (пока идёт проверка
@@ -45,15 +45,32 @@
 
   <script>
     // Пустой нейтральный экран. Ничего из «приложения» не рисуем, пока не
-    // подтверждён доступ: чужого мгновенно уводит редиректом, оформление и
-    // контент применяются только после granted.
-    const tg = window.Telegram ? window.Telegram.WebApp : null;
+    // подтверждён доступ. Проверку доступа стартуем СРАЗУ, не дожидаясь
+    // загрузки telegram-web-app.js (он async) — чтобы чужого уводило как
+    // можно раньше. initData читаем напрямую из URL.
     const BOT_ID = "__BOT_ID__";
     const CFG = __CFG__;
     // Токен доступа из URL (?t=...) — когда мини-апп открыт web_app-кнопкой
     // бота. Для startapp-ссылки токен прилетает внутри initData.
     const URL_TOKEN = new URLSearchParams(window.location.search).get("t") || "";
     const root = document.getElementById("root");
+
+    function tgApp() { return window.Telegram ? window.Telegram.WebApp : null; }
+
+    function getInitData() {
+      const tg = tgApp();
+      if (tg && tg.initData) return tg.initData;
+      // из hash: #tgWebAppData=<urlencoded initData>&...
+      const m = (window.location.hash || "").match(/tgWebAppData=([^&]+)/);
+      return m ? decodeURIComponent(m[1]) : "";
+    }
+
+    function whenTgReady(cb, tries) {
+      tries = tries || 0;
+      const tg = tgApp();
+      if (tg || tries > 50) { cb(tg); return; }
+      setTimeout(function () { whenTgReady(cb, tries + 1); }, 20);
+    }
 
     function html(s) { root.innerHTML = '<div class="card">' + s + '</div>'; }
 
@@ -72,29 +89,36 @@
     }
 
     function renderGranted() {
-      if (tg) { tg.ready(); try { tg.expand(); } catch (e) {} }
-      applyTheme();
-      if (CFG.main && CFG.main.trim()) { html(CFG.main); return; }
-      const u = (tg && tg.initDataUnsafe && tg.initDataUnsafe.user) || {};
-      const name = u.first_name ? (" " + u.first_name) : "";
-      html(
-        '<h2>Доступ открыт ✅</h2>' +
-        '<p>Привет' + name + '!</p>' +
-        '<p>Здесь будет ваш шаблон мини-аппа.</p>'
-      );
+      whenTgReady(function (tg) {
+        if (tg) { tg.ready(); try { tg.expand(); } catch (e) {} }
+        applyTheme();
+        if (CFG.main && CFG.main.trim()) { html(CFG.main); return; }
+        const u = (tg && tg.initDataUnsafe && tg.initDataUnsafe.user) || {};
+        const name = u.first_name ? (" " + u.first_name) : "";
+        html(
+          '<h2>Доступ открыт ✅</h2>' +
+          '<p>Привет' + name + '!</p>' +
+          '<p>Здесь будет ваш шаблон мини-аппа.</p>'
+        );
+      });
     }
 
     function redirect(url) {
+      const tg = tgApp();
       if (!url) { if (tg && tg.close) tg.close(); return; }
       const isTme = /(^|\/\/)(t\.me|telegram\.me)/i.test(url);
+      // внешний ресурс — мгновенный переход вебвью (не ждём telegram-скрипт)
       if (/^https?:\/\//i.test(url) && !isTme) {
-        // внешний ресурс — мгновенный переход вебвью, без отрисовки
         window.location.replace(url);
         return;
       }
-      // t.me — открываем в Telegram и сразу закрываем мини-апп
-      if (tg && tg.openTelegramLink) { try { tg.openTelegramLink(url); } catch (e) {} }
-      if (tg && tg.close) tg.close();
+      // t.me — открываем в Telegram и закрываем мини-апп
+      if (tg && tg.openTelegramLink) {
+        try { tg.openTelegramLink(url); } catch (e) {}
+        if (tg.close) tg.close();
+      } else {
+        window.location.replace(url);
+      }
     }
 
     async function main() {
@@ -103,13 +127,13 @@
           method: "POST",
           headers: { "Content-Type": "application/json" },
           credentials: "include",
-          body: JSON.stringify({ init_data: (tg && tg.initData) || "", token: URL_TOKEN }),
+          body: JSON.stringify({ init_data: getInitData(), token: URL_TOKEN }),
         });
         const data = await r.json();
         if (data.mode === "granted") renderGranted();
         else redirect(data.redirect_url);
       } catch (e) {
-        // при сбое не показываем приложение — закрываем
+        const tg = tgApp();
         if (tg && tg.close) tg.close();
       }
     }
