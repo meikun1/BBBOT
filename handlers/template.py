@@ -19,6 +19,7 @@
 ========================================================================
 """
 
+import secrets
 from html import escape
 
 from aiogram import F, Router
@@ -39,8 +40,10 @@ from database import (
     get_bot,
     get_owner_templates,
     get_template,
+    get_template_by_share_code,
     rename_template,
     set_bot_template,
+    set_template_share_code,
     update_template_content,
 )
 from handlers.cards import owns
@@ -50,6 +53,7 @@ router = Router()
 
 class TemplateEdit(StatesGroup):
     waiting_for_text = State()
+    waiting_for_code = State()
 
 
 def _ensure_templates(owner_id: int) -> list[dict]:
@@ -89,7 +93,7 @@ def _menu_kb(bot: dict, templates: list[dict]) -> InlineKeyboardMarkup:
     )
     b.row(
         InlineKeyboardButton(
-            text="📥 Добавить по коду", callback_data=f"tpl_soon:{bid}:code"
+            text="📥 Добавить по коду", callback_data=f"tpl_addcode:{bid}"
         ),
         InlineKeyboardButton(text="⬅️ Назад", callback_data=f"bot:{bid}"),
     )
@@ -440,7 +444,111 @@ async def std_action(callback: CallbackQuery) -> None:
         await _show_uniq(callback, bid, template)
         await callback.answer()
         return
+    if field == "tcode":
+        await _show_code(callback, bid, template)
+        await callback.answer()
+        return
     await callback.answer("🚧 В разработке", show_alert=True)
+
+
+# --------------------------------------------------- код шаблона (шеринг)
+def _code_kb(bid: int, tid: int) -> InlineKeyboardMarkup:
+    b = InlineKeyboardBuilder()
+    b.row(
+        InlineKeyboardButton(
+            text="🔄 Обновить код", callback_data=f"tcode_new:{bid}:{tid}"
+        )
+    )
+    b.row(InlineKeyboardButton(text="⬅️ Назад", callback_data=f"std_open:{bid}:{tid}"))
+    return b.as_markup()
+
+
+async def _show_code(callback: CallbackQuery, bid: int, template: dict) -> None:
+    code = template.get("share_code")
+    if not code:
+        code = secrets.token_urlsafe(6)
+        set_template_share_code(template["id"], code)
+    await callback.message.edit_text(
+        "⚙️ <b>Код шаблона</b>\n\n"
+        "Передайте этот код другому владельцу — он сможет добавить копию "
+        "шаблона через «📥 Добавить по коду».\n\n"
+        f"<code>{escape(code)}</code>",
+        reply_markup=_code_kb(bid, template["id"]),
+    )
+
+
+@router.callback_query(F.data.startswith("tcode_new:"))
+async def code_regen(callback: CallbackQuery) -> None:
+    res = _resolve_bt(callback)
+    if res is None:
+        await callback.answer("Не найдено.", show_alert=True)
+        return
+    bid, tid, template = res
+    set_template_share_code(tid, secrets.token_urlsafe(6))
+    await _show_code(callback, bid, get_template(tid))
+    await callback.answer("Код обновлён 🔄")
+
+
+def _resolve_bt(callback: CallbackQuery) -> tuple[int, int, dict] | None:
+    """Разбор callback prefix:bid:tid с проверкой владения."""
+    parts = callback.data.split(":")
+    bid, tid = int(parts[1]), int(parts[2])
+    bot = get_bot(bid)
+    if not owns(callback.from_user.id, bot):
+        return None
+    template = get_template(tid)
+    if template is None or template["owner_id"] != callback.from_user.id:
+        return None
+    return bid, tid, template
+
+
+# --------------------------------------------------- добавить по коду
+@router.callback_query(F.data.startswith("tpl_addcode:"))
+async def add_by_code(callback: CallbackQuery, state: FSMContext) -> None:
+    bid = int(callback.data.split(":")[1])
+    bot = get_bot(bid)
+    if not owns(callback.from_user.id, bot):
+        await callback.answer("Бот не найден.", show_alert=True)
+        return
+    await state.set_state(TemplateEdit.waiting_for_code)
+    await state.update_data(bid=bid)
+    await callback.message.edit_text(
+        "📥 Пришлите код шаблона, которым с вами поделились:",
+        reply_markup=InlineKeyboardMarkup(
+            inline_keyboard=[
+                [InlineKeyboardButton(text="⬅️ Отмена", callback_data=f"template:{bid}")]
+            ]
+        ),
+    )
+    await callback.answer()
+
+
+@router.message(TemplateEdit.waiting_for_code, F.text)
+async def code_save(message: Message, state: FSMContext) -> None:
+    data = await state.get_data()
+    await state.clear()
+    bid = data.get("bid")
+    code = message.text.strip()
+    src = get_template_by_share_code(code)
+    if src is None:
+        await message.answer(
+            "❌ Шаблон с таким кодом не найден. Проверьте код и попробуйте снова.",
+        )
+        return
+    # создаём собственную копию шаблона у текущего владельца
+    new_id = create_template(
+        message.from_user.id, src["name"], src["kind"], src["content"]
+    )
+    if bid:
+        set_bot_template(bid, new_id)
+    bot = get_bot(bid) if bid else None
+    if bot:
+        templates = _ensure_templates(message.from_user.id)
+        await message.answer(
+            "✅ Шаблон добавлен!", reply_markup=_menu_kb(bot, templates)
+        )
+    else:
+        await message.answer("✅ Шаблон добавлен!")
 
 
 @router.callback_query(F.data.startswith("uniq_tog:"))
