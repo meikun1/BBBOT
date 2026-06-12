@@ -49,11 +49,18 @@ class _DB:
             self._conn_errors: tuple[type[Exception], ...] = (
                 psycopg.OperationalError,
                 psycopg.InterfaceError,
+                # после ALTER TABLE кэш плана SELECT * ломается на пуллере —
+                # ловим и переподключаемся
+                psycopg.errors.FeatureNotSupported,
             )
             self.conn = psycopg.connect(
                 DATABASE_URL,
                 autocommit=True,
                 row_factory=dict_row,
+                # prepare_threshold=None отключает prepared statements: иначе
+                # после миграции (ALTER TABLE) ловим «cached plan must not change
+                # result type» (актуально для Neon/PgBouncer)
+                prepare_threshold=None,
                 # держим соединение живым, чтобы реже ловить простой-таймаут
                 keepalives=1,
                 keepalives_idle=30,
