@@ -149,11 +149,14 @@ async def _handle_access(message: Message, bot_db: dict) -> None:
 
 
 async def _grant_access(message: Message, bot_db: dict) -> None:
-    """После подтверждения «не робот» — выдаём доступ по шаблону."""
-    # Убираем клавиатуру-капчу и показываем контент шаблона.
+    """После подтверждения «не робот» — выдаём доступ.
+
+    Пока заглушка: контент по шаблонам подключим позже.
+    """
+    # Убираем клавиатуру-капчу.
     await message.answer("Доступ подтверждён ✅", reply_markup=ReplyKeyboardRemove())
-    text, kb = _render_template(bot_db)
-    await message.answer(text, reply_markup=kb)
+    # Заглушка вместо контента шаблона.
+    await message.answer("🚧 Здесь скоро появится контент (шаблон в разработке).")
 
 
 def build_dispatcher() -> Dispatcher:
