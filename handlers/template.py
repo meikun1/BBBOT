@@ -1,18 +1,17 @@
 """
 ========================================================================
- МОДУЛЬ: «📋 Изменить шаблон» → меню шаблонов
+ МОДУЛЬ: «📋 Изменить шаблон» → меню шаблонов → редактор шаблона
 ------------------------------------------------------------------------
- Шаблон дочернего бота — что он показывает/пишет юзеру после входа.
-
- Структура (как в макете):
-   📋 Меню шаблонов
-   [ Текущий шаблон ]                 ← открывает выбор шаблона
+ Меню шаблонов:
+   📋 Меню шаблонов:
+   [ Стандартный шаблон ]             ← открывает редактор шаблона
    [⚙️ Создать шаблон] [➕ Стандартный шаблон]
    [💎 Шаблоны мини-апп]
    [📥 Добавить по коду] [⬅️ Назад]
 
- Пункты «Создать/Добавить/Мини-апп» — заглушки (в разработке), наполняем
- по мере развития модуля.
+ Редактор стандартного шаблона (по макету) — набор настраиваемых полей:
+ тексты сообщений, кнопки, страницы мини-аппа, уникализация текста и т.д.
+ Пункты пока заглушки («в разработке») — наполняем по очереди.
 ========================================================================
 """
 
@@ -22,7 +21,7 @@ from aiogram.utils.keyboard import InlineKeyboardBuilder
 
 from database import get_bot, update_bot_field
 from handlers.cards import owns
-from templates import TEMPLATES, template_name
+from templates import template_name
 
 router = Router()
 
@@ -35,11 +34,11 @@ def _menu_text(bot: dict) -> str:
 def _menu_kb(bot: dict) -> InlineKeyboardMarkup:
     bid = bot["id"]
     b = InlineKeyboardBuilder()
-    # текущий шаблон (на всю ширину) — открывает выбор
+    # текущий шаблон (на всю ширину) — открывает редактор
     b.row(
         InlineKeyboardButton(
             text=template_name(bot.get("template")),
-            callback_data=f"tpl_pick:{bid}",
+            callback_data=f"std_open:{bid}",
         )
     )
     b.row(
@@ -64,26 +63,57 @@ def _menu_kb(bot: dict) -> InlineKeyboardMarkup:
     return b.as_markup()
 
 
-# --------------------------------------------------------- выбор шаблона
-def _picker_text(bot: dict) -> str:
-    return (
-        "📋 <b>Выбор шаблона</b>\n\n"
-        f"Текущий: <b>{template_name(bot.get('template'))}</b>\n\n"
-        "Нажмите, чтобы выбрать:"
-    )
+# ------------------------------------------- редактор стандартного шаблона
+# (подпись, callback-действие) — поля редактора по макету
+_STD_ROWS: list[tuple[str, str]] = [
+    ("Ответ на /start", "start_msg"),
+    ("Кнопка запуска мини-апп", "start_btn"),
+    ("Второе сообщение после /start", "second_msg"),
+    ("Просроченный вход", "expired_msg"),
+    ("Кнопка просрочки", "expired_btn"),
+    ("Успешная авторизация", "auth_ok"),
+    ("Автоспам авторизованные", "spam_auth"),
+    ("Автоспам неавторизованные", "spam_unauth"),
+    ("Пост админ канала", "admin_post"),
+    ("Показ успешной авторизации", "show_auth"),
+    ("📋 Показ кода", "show_code"),
+    ("📱 Страницы мини-апп", "pages"),
+]
 
 
-def _picker_kb(bot: dict) -> InlineKeyboardMarkup:
+def _std_text(bot: dict) -> str:
+    return "💎 <b>Шаблон мини-апп «Стандартный шаблон»:</b>"
+
+
+def _std_kb(bot: dict) -> InlineKeyboardMarkup:
     bid = bot["id"]
-    current = bot.get("template") or "standard"
     b = InlineKeyboardBuilder()
-    for tid, name in TEMPLATES.items():
-        mark = "✅ " if tid == current else ""
-        b.row(
-            InlineKeyboardButton(
-                text=f"{mark}{name}", callback_data=f"tpl_set:{bid}:{tid}"
-            )
+    for label, act in _STD_ROWS:
+        b.row(InlineKeyboardButton(text=label, callback_data=f"std_act:{bid}:{act}"))
+    b.row(
+        InlineKeyboardButton(
+            text="⚡ Уникализация текста", callback_data=f"std_act:{bid}:uniq"
+        ),
+        InlineKeyboardButton(
+            text="📋 Создать копию", callback_data=f"std_act:{bid}:copy"
+        ),
+    )
+    b.row(
+        InlineKeyboardButton(
+            text="⚙️ Код шаблона", callback_data=f"std_act:{bid}:tcode"
+        ),
+        InlineKeyboardButton(text="🏷 Название", callback_data=f"std_act:{bid}:name"),
+    )
+    b.row(
+        InlineKeyboardButton(
+            text="🎨 Оформление бота", callback_data=f"std_act:{bid}:design"
         )
+    )
+    b.row(
+        InlineKeyboardButton(
+            text="🗑 Удалить шаблон", callback_data=f"std_act:{bid}:delete"
+        )
+    )
     b.row(InlineKeyboardButton(text="⬅️ Назад", callback_data=f"template:{bid}"))
     return b.as_markup()
 
@@ -99,32 +129,22 @@ async def open_menu(callback: CallbackQuery) -> None:
     await callback.answer()
 
 
-@router.callback_query(F.data.startswith("tpl_pick:"))
-async def open_picker(callback: CallbackQuery) -> None:
+@router.callback_query(F.data.startswith("std_open:"))
+async def open_std(callback: CallbackQuery) -> None:
     bot = get_bot(int(callback.data.split(":")[1]))
     if not owns(callback.from_user.id, bot):
         await callback.answer("Бот не найден.", show_alert=True)
         return
-    await callback.message.edit_text(_picker_text(bot), reply_markup=_picker_kb(bot))
+    # выбор стандартного шаблона как активного
+    update_bot_field(bot["id"], "template", "standard")
+    bot = get_bot(bot["id"])
+    await callback.message.edit_text(_std_text(bot), reply_markup=_std_kb(bot))
     await callback.answer()
 
 
-@router.callback_query(F.data.startswith("tpl_set:"))
-async def set_template(callback: CallbackQuery) -> None:
-    _, bot_id_str, tid = callback.data.split(":")
-    bot_id = int(bot_id_str)
-    bot = get_bot(bot_id)
-    if not owns(callback.from_user.id, bot):
-        await callback.answer("Бот не найден.", show_alert=True)
-        return
-    if tid not in TEMPLATES:
-        await callback.answer("Неизвестный шаблон.", show_alert=True)
-        return
-    update_bot_field(bot_id, "template", tid)
-    bot = get_bot(bot_id)
-    # после выбора возвращаемся в меню шаблонов
-    await callback.message.edit_text(_menu_text(bot), reply_markup=_menu_kb(bot))
-    await callback.answer("Шаблон изменён ✅")
+@router.callback_query(F.data.startswith("std_act:"))
+async def std_action(callback: CallbackQuery) -> None:
+    await callback.answer("🚧 В разработке", show_alert=True)
 
 
 @router.callback_query(F.data.startswith("tpl_soon:"))
