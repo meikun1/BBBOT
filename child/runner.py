@@ -124,7 +124,13 @@ def build_router() -> Router:
         try:
             await event.bot.send_message(target, text, reply_markup=kb)
         except Exception as e:
-            logger.info("can't DM %s: %s", target, e)
+            # Если не прошло из-за кнопки — пробуем хотя бы текст без неё.
+            logger.warning("join DM failed for %s: %s", target, e)
+            if kb is not None:
+                try:
+                    await event.bot.send_message(target, text)
+                except Exception as e2:
+                    logger.warning("join DM (no button) failed for %s: %s", target, e2)
 
     # ----- /start с аргументом (deep-link) -----
     @router.message(CommandStart(deep_link=True))
