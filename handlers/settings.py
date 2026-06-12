@@ -43,6 +43,11 @@ def _settings_kb(bot_id: int) -> InlineKeyboardMarkup:
             ],
             [
                 InlineKeyboardButton(
+                    text="🌍 Запуски", callback_data=f"stats:{bot_id}"
+                )
+            ],
+            [
+                InlineKeyboardButton(
                     text="✏️ Имя бота", callback_data=f"set_name:{bot_id}"
                 )
             ],
@@ -56,6 +61,7 @@ def _settings_text(bot: dict) -> str:
         f"⚙️ <b>Настройки</b> — {bot['username']}\n\n"
         "• <b>Прямая ссылка</b> — мини-апп по постоянной startapp-ссылке\n"
         "• <b>Выбор прокси</b> — пул прокси для поднятия ботов\n"
+        "• <b>Запуски</b> — статистика запусков бота\n"
         "• <b>Имя бота</b> — изменить отображаемое имя бота"
     )
 
