@@ -34,4 +34,5 @@ DIRECT_LINK_MANUAL_URL: str = os.getenv(
 # Запускать ли FastAPI-приложение вместе с менеджером.
 RUN_WEB: bool = os.getenv("RUN_WEB", "0") == "1"
 WEB_HOST: str = os.getenv("WEB_HOST", "0.0.0.0")
-WEB_PORT: int = int(os.getenv("WEB_PORT", "8080"))
+# Railway передаёт порт через переменную PORT — берём её в первую очередь.
+WEB_PORT: int = int(os.getenv("PORT", os.getenv("WEB_PORT", "8080")))

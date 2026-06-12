@@ -43,7 +43,7 @@ direct_link/            — модуль «Прямая ссылка» (FastAPI 
 web/app.py              — FastAPI мини-аппа (опционально)
 ```
 
-## Запуск
+## Запуск локально
 
 ```bash
 pip install -r requirements.txt
@@ -55,6 +55,30 @@ python bot.py
 Дочерние боты поднимаются автоматически при старте и при добавлении.
 Кнопка «Перезапуск» перезапускает polling выбранного бота.
 
+## Деплой на Railway (бот-воркер + Neon)
+
+Менеджер работает в режиме **polling**, поэтому это обычный worker-процесс
+(HTTP-порт не нужен, пока `RUN_WEB=0`).
+
+1. **База — Neon.** Создайте проект на [neon.tech](https://neon.tech),
+   скопируйте connection string (psql) — он вида
+   `postgresql://user:pass@ep-xxx.neon.tech/dbname?sslmode=require`.
+2. **Создайте сервис на Railway** из этого репозитория (Deploy from GitHub
+   repo). Railway соберёт проект через Nixpacks, старт-команда уже задана в
+   `railway.json` → `python bot.py`.
+3. **Переменные окружения** (Railway → Variables):
+   - `MANAGER_BOT_TOKEN` — токен бота-менеджера из @BotFather
+   - `DATABASE_URL` — connection string из Neon
+   - `DIRECT_LINK_SESSION_SECRET` — длинная случайная строка
+   - (опц.) `DIRECT_LINK_REDIRECT_URL`, `DIRECT_LINK_MANUAL_URL`
+4. **Деплой.** В логах должно появиться «Менеджер запущен».
+
+> Таблицы создаются автоматически при первом старте (`init_db`).
+> Так как БД — Neon, данные переживают редеплои и рестарты.
+
+Файлы для Railway: `railway.json` (старт-команда), `Procfile` (worker),
+`.python-version` (3.11), `requirements.txt`.
+
 ### Мини-апп «Прямая ссылка»
 
 Для боевой работы мини-аппа нужен HTTPS-домен, указанный в @BotFather
@@ -63,7 +87,7 @@ python bot.py
 
 ## Заметки
 
-- БД — SQLite (для теста). `database.py` имеет узкий синхронный API,
-  его можно заменить на async/Postgres, сохранив сигнатуры функций.
+- БД — PostgreSQL/Neon (если задан `DATABASE_URL`) или SQLite (иначе).
+  `database.py` — единый синхронный API над обоими бэкендами.
 - «Гео» в статистике берётся из `language_code` пользователя — лучшее
   доступное приближение без запроса геолокации.
