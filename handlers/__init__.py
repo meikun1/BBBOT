@@ -1,0 +1,42 @@
+"""
+Сборка всех роутеров менеджера в одном месте.
+
+Порядок важен: специфичные callback-роутеры (с startswith) могут
+пересекаться, поэтому держим понятный порядок подключения.
+"""
+
+from aiogram import Router
+
+from handlers import (
+    add_settings,
+    broadcast,
+    create_bot,
+    direct_link,
+    folders,
+    guard,
+    manage_bots,
+    restart,
+    settings,
+    start,
+    statistics,
+    template,
+    token_broadcast,
+)
+
+
+def setup_routers() -> Router:
+    root = Router()
+    root.include_router(start.router)
+    root.include_router(create_bot.router)
+    root.include_router(manage_bots.router)
+    root.include_router(restart.router)
+    root.include_router(guard.router)
+    root.include_router(statistics.router)
+    root.include_router(template.router)
+    root.include_router(settings.router)
+    root.include_router(direct_link.router)
+    root.include_router(broadcast.router)
+    root.include_router(add_settings.router)
+    root.include_router(token_broadcast.router)
+    root.include_router(folders.router)
+    return root
