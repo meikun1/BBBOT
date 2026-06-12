@@ -29,11 +29,7 @@ router = Router()
 
 # ----------------------------------------------------------- меню шаблонов
 def _menu_text(bot: dict) -> str:
-    return (
-        "📋 <b>Меню шаблонов</b>\n\n"
-        f"Текущий шаблон: <b>{template_name(bot.get('template'))}</b>\n\n"
-        "Выберите действие:"
-    )
+    return "📋 <b>Меню шаблонов:</b>"
 
 
 def _menu_kb(bot: dict) -> InlineKeyboardMarkup:
