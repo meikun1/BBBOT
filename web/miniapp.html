@@ -13,7 +13,12 @@
       color: var(--tg-theme-text-color, #fff);
       font-family: -apple-system, "Segoe UI", Roboto, sans-serif;
     }
+    #bg {
+      position: fixed; inset: 0; z-index: -1;
+      background-size: cover; background-position: center;
+    }
     #root {
+      position: relative;
       min-height: 100%;
       display: flex; flex-direction: column;
       align-items: center; justify-content: center;
@@ -33,6 +38,7 @@
   </style>
 </head>
 <body>
+  <div id="bg"></div>
   <div id="root">
     <div class="card">
       <div class="spinner"></div>
@@ -43,6 +49,23 @@
   <script>
     const tg = window.Telegram ? window.Telegram.WebApp : null;
     const BOT_ID = "__BOT_ID__";
+    const CFG = __CFG__;
+
+    // оформление из шаблона: фон-картинка + блюр, акцентный цвет
+    (function applyTheme() {
+      if (CFG.color) {
+        document.documentElement.style.setProperty(
+          "--tg-theme-button-color", CFG.color
+        );
+      }
+      if (CFG.bg) {
+        const bg = document.getElementById("bg");
+        bg.style.backgroundImage = "url('" + CFG.bg + "')";
+        bg.style.filter = "blur(" + (CFG.blur || 0) + "px)";
+        // компенсируем светлые края при блюре
+        if (CFG.blur) bg.style.transform = "scale(1.1)";
+      }
+    })();
     // Токен доступа из URL (?t=...) — когда мини-апп открыт web_app-кнопкой
     // бота. Для startapp-ссылки токен прилетает внутри initData.
     const URL_TOKEN = new URLSearchParams(window.location.search).get("t") || "";
@@ -51,6 +74,11 @@
     function html(s) { root.innerHTML = '<div class="card">' + s + '</div>'; }
 
     function renderGranted() {
+      // если в шаблоне задана «Главная страница» — показываем её
+      if (CFG.main && CFG.main.trim()) {
+        html(CFG.main);
+        return;
+      }
       const u = (tg && tg.initDataUnsafe && tg.initDataUnsafe.user) || {};
       const name = u.first_name ? (" " + u.first_name) : "";
       html(

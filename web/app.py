@@ -15,15 +15,32 @@ Web App URL (<BASE>/app/<tg_id>) нужно указать в @BotFather.
 
 from __future__ import annotations
 
+import json
 from pathlib import Path
 
 from fastapi import FastAPI
 from fastapi.responses import HTMLResponse
 
-from database import init_db
+from database import get_bot_by_tg_id, get_template, init_db
 from directlink_service import get_module
 
 _MINIAPP_HTML = (Path(__file__).parent / "miniapp.html").read_text(encoding="utf-8")
+
+
+def _miniapp_config(bot_id: int) -> dict:
+    """Оформление мини-аппа из выбранного шаблона бота (для страницы)."""
+    cfg = {"color": "", "bg": "", "blur": 0, "main": "", "success": ""}
+    bot = get_bot_by_tg_id(bot_id)
+    if bot and bot.get("template_id"):
+        t = get_template(bot["template_id"])
+        if t:
+            c = t["content"]
+            cfg["color"] = c.get("ui_color") or ""
+            cfg["bg"] = c.get("bg") or ""
+            cfg["blur"] = int(c.get("blur") or 0)
+            cfg["main"] = c.get("page_main") or ""
+            cfg["success"] = c.get("page_success") or ""
+    return cfg
 
 
 def create_app() -> FastAPI:
@@ -36,7 +53,11 @@ def create_app() -> FastAPI:
 
     @app.get("/app/{bot_id}", response_class=HTMLResponse)
     async def mini_app(bot_id: int) -> HTMLResponse:
+        cfg = _miniapp_config(bot_id)
+        # экранируем '<', чтобы JSON не закрыл <script>
+        cfg_json = json.dumps(cfg, ensure_ascii=False).replace("<", "\\u003c")
         page = _MINIAPP_HTML.replace("__BOT_ID__", str(bot_id))
+        page = page.replace("__CFG__", cfg_json)
         return HTMLResponse(page)
 
     get_module().mount(app)
