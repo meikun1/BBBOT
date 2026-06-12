@@ -27,7 +27,8 @@ DIRECT_LINK_REDIRECT_URL: str = os.getenv(
 )
 # Ссылка на мануал «как поставить мини-апп ссылку в @BotFather».
 DIRECT_LINK_MANUAL_URL: str = os.getenv(
-    "DIRECT_LINK_MANUAL_URL", "https://telegram.org/blog/bot-revolution"
+    "DIRECT_LINK_MANUAL_URL",
+    "https://telegra.ph/Ustanovka-ssylki-dlya-mini-app-02-11",
 )
 
 # --- веб-сервер мини-аппа (FastAPI) ---
