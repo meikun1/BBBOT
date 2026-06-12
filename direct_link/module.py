@@ -29,6 +29,9 @@ VerifyAdmin = Callable[[Request, int], Awaitable[None]]
 
 class StartIn(BaseModel):
     init_data: str
+    # Токен доступа из URL мини-аппа (?t=...), когда он открыт web_app-кнопкой
+    # бота, а не startapp-ссылкой. Для startapp токен берётся из init_data.
+    token: str | None = None
 
 
 class StartOut(BaseModel):
@@ -143,7 +146,7 @@ class DirectLinkModule:
             bot_id: int, payload: StartIn, response: Response
         ) -> StartOut:
             state = await self.storage.get(bot_id)
-            if state is None or not state["enabled"]:
+            if state is None:
                 return self._stub()
 
             bot_token = await self.get_bot_token(bot_id)
@@ -157,7 +160,12 @@ class DirectLinkModule:
             except InitDataError:
                 return self._stub()
 
-            if not hmac.compare_digest(start_param, state["startapp_token"]):
+            # Токен берём из подписанного startapp-параметра (режим прямой
+            # ссылки) либо из тела (мини-апп открыт web_app-кнопкой бота).
+            provided = start_param or (payload.token or "")
+            if not provided or not hmac.compare_digest(
+                provided, state["startapp_token"]
+            ):
                 return self._stub()
 
             cookie = self._make_cookie(bot_id, user.id, state["token_version"])
@@ -170,7 +178,7 @@ class DirectLinkModule:
             token: str | None = Cookie(default=None, alias=cookie_name),
         ) -> StartOut:
             state = await self.storage.get(bot_id)
-            if state is None or not state["enabled"]:
+            if state is None:
                 return self._stub()
             payload = self._read_cookie(token)
             if (

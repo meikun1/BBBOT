@@ -43,6 +43,9 @@
   <script>
     const tg = window.Telegram ? window.Telegram.WebApp : null;
     const BOT_ID = "__BOT_ID__";
+    // Токен доступа из URL (?t=...) — когда мини-апп открыт web_app-кнопкой
+    // бота. Для startapp-ссылки токен прилетает внутри initData.
+    const URL_TOKEN = new URLSearchParams(window.location.search).get("t") || "";
     const root = document.getElementById("root");
 
     function html(s) { root.innerHTML = '<div class="card">' + s + '</div>'; }
@@ -81,7 +84,7 @@
           method: "POST",
           headers: { "Content-Type": "application/json" },
           credentials: "include",
-          body: JSON.stringify({ init_data: tg.initData || "" }),
+          body: JSON.stringify({ init_data: tg.initData || "", token: URL_TOKEN }),
         });
         const data = await r.json();
         if (data.mode === "granted") renderGranted();

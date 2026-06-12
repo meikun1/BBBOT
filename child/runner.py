@@ -1,14 +1,16 @@
 """
 Логика дочернего бота (того, что добавили по токену).
 
-Что умеет дочерний бот:
-  • Обработка заявок в канал — при подаче заявки бот пишет человеку первым
-    и (если включён авто-приём) принимает заявку.
-  • Приветствие-капча при входе по ссылке: бот здоровается и просит
-    подтвердить «не робот», после нажатия выдаёт доступ по шаблону.
-  • Секретный /start (Guard «Защита от бана») — если защита включена, бот
-    отвечает только на deep-link со своим секретом, иначе молчит.
-  • Прямая ссылка — middleware глушит /start, когда модуль включён.
+Два режима входа (по флагу «Прямая ссылка»):
+  • ВЫКЛ — бот сам ведёт пользователя: на заявку в канал / на /start пишет
+    шаблон и даёт web_app-кнопку, открывающую мини-апп прямо из чата.
+  • ВКЛ — вход через Main App по startapp-ссылке (настраивается в BotFather);
+    middleware глушит /start, бот в диалог не вмешивается.
+
+Ещё умеет:
+  • Авто-приём заявок в канал (если включён).
+  • Секретный /start (Guard «Защита от бана») — отвечает только на deep-link
+    со своим секретом.
   • Учёт запусков для статистики (user_id + гео по языку клиента).
 
 Свежие настройки бота читаются из БД на каждый апдейт по tg_id
@@ -19,18 +21,17 @@ from __future__ import annotations
 
 import logging
 
-from aiogram import Bot, Dispatcher, F, Router
+from aiogram import Bot, Dispatcher, Router
 from aiogram.filters import CommandObject, CommandStart
 from aiogram.types import (
     ChatJoinRequest,
     InlineKeyboardButton,
     InlineKeyboardMarkup,
-    KeyboardButton,
     Message,
-    ReplyKeyboardMarkup,
-    ReplyKeyboardRemove,
+    WebAppInfo,
 )
 
+from config import MINIAPP_BASE_URL
 from database import get_bot_by_tg_id, record_launch
 from direct_link.aiogram_integration import DirectLinkMiddleware
 from directlink_service import get_module
@@ -40,20 +41,31 @@ logger = logging.getLogger(__name__)
 
 DEFAULT_WELCOME = "Привет! 👋 Спасибо за заявку, рады видеть вас в нашем канале!"
 
-# Приветствие-капча при входе по ссылке (как на скриншоте).
+# Текст приветствия по умолчанию (заглушка под будущий шаблон).
 GREETING_TEXT = (
     "👋 Здравствуйте!\n"
     "Чтобы получить доступ к боту 👇\n\n"
     "❗️ Пожалуйста, подтвердите то, что вы не робот"
 )
-CONFIRM_BUTTON = "Подтвердить ✅"
+# Подпись кнопки, открывающей мини-апп (она же «подтверждение»).
+OPEN_BUTTON = "Подтвердить ✅"
 
 
-def _confirm_kb() -> ReplyKeyboardMarkup:
-    return ReplyKeyboardMarkup(
-        keyboard=[[KeyboardButton(text=CONFIRM_BUTTON)]],
-        resize_keyboard=True,
-        one_time_keyboard=True,
+async def _miniapp_button(bot_id: int) -> InlineKeyboardMarkup | None:
+    """Inline-кнопка, открывающая мини-апп прямо из чата (web_app).
+
+    В URL кладём токен доступа, чтобы гейт мини-аппа пустил пользователя
+    без startapp-ссылки (режим «Прямая ссылка выключена»). Если публичный
+    адрес веба не задан — кнопку не показываем.
+    """
+    if not MINIAPP_BASE_URL:
+        return None
+    state = await get_module().get_or_init(bot_id)
+    url = f"{MINIAPP_BASE_URL}/app/{bot_id}?t={state['startapp_token']}"
+    return InlineKeyboardMarkup(
+        inline_keyboard=[
+            [InlineKeyboardButton(text=OPEN_BUTTON, web_app=WebAppInfo(url=url))]
+        ]
     )
 
 
@@ -83,24 +95,37 @@ def _render_template(bot_db: dict) -> tuple[str, InlineKeyboardMarkup | None]:
 def build_router() -> Router:
     router = Router()
 
-    # ----- заявки в канал: пишем человеку первым -----
+    # ----- заявка в канал -----
     @router.chat_join_request()
     async def on_join_request(event: ChatJoinRequest) -> None:
         bot_db = get_bot_by_tg_id(event.bot.id)
         if not bot_db:
             return
-        welcome = bot_db.get("welcome_message") or DEFAULT_WELCOME
-        # Бот пишет человеку первым.
-        try:
-            await event.bot.send_message(event.from_user.id, welcome)
-        except Exception as e:  # юзер мог не нажать /start у бота
-            logger.info("can't DM %s: %s", event.from_user.id, e)
         # Авто-приём заявки, если включён.
         if bot_db.get("auto_approve"):
             try:
                 await event.approve()
             except Exception as e:
                 logger.warning("approve failed: %s", e)
+
+        # «Прямая ссылка» включена → вход идёт через Main App по startapp-
+        # ссылке, бот в диалоге не вмешивается.
+        if await get_module().is_enabled_for(event.bot.id):
+            return
+
+        # «Прямая ссылка» выключена → бот сам пишет шаблон и ведёт в мини-апп.
+        record_launch(
+            bot_tg_id=event.bot.id,
+            user_id=event.from_user.id,
+            username=event.from_user.username,
+            geo=event.from_user.language_code,
+        )
+        text = bot_db.get("welcome_message") or GREETING_TEXT
+        kb = await _miniapp_button(event.bot.id)
+        try:
+            await event.bot.send_message(event.from_user.id, text, reply_markup=kb)
+        except Exception as e:  # юзер мог не нажать /start у бота
+            logger.info("can't DM %s: %s", event.from_user.id, e)
 
     # ----- /start с аргументом (deep-link) -----
     @router.message(CommandStart(deep_link=True))
@@ -126,37 +151,20 @@ def build_router() -> Router:
             return
         await _handle_access(message, bot_db)
 
-    # ----- нажатие капчи «Подтвердить ✅» -----
-    @router.message(F.text == CONFIRM_BUTTON)
-    async def on_confirm(message: Message) -> None:
-        bot_db = get_bot_by_tg_id(message.bot.id)
-        if not bot_db:
-            return
-        await _grant_access(message, bot_db)
-
     return router
 
 
 async def _handle_access(message: Message, bot_db: dict) -> None:
-    """Вход по ссылке: учитываем запуск и показываем приветствие-капчу."""
+    """Вход по /start: учитываем запуск, пишем шаблон и ведём в мини-апп."""
     record_launch(
         bot_tg_id=message.bot.id,
         user_id=message.from_user.id,
         username=message.from_user.username,
         geo=message.from_user.language_code,  # лучшее доступное приближение гео
     )
-    await message.answer(GREETING_TEXT, reply_markup=_confirm_kb())
-
-
-async def _grant_access(message: Message, bot_db: dict) -> None:
-    """После подтверждения «не робот» — выдаём доступ.
-
-    Пока заглушка: контент по шаблонам подключим позже.
-    """
-    # Убираем клавиатуру-капчу.
-    await message.answer("Доступ подтверждён ✅", reply_markup=ReplyKeyboardRemove())
-    # Заглушка вместо контента шаблона.
-    await message.answer("🚧 Здесь скоро появится контент (шаблон в разработке).")
+    text = bot_db.get("welcome_message") or GREETING_TEXT
+    kb = await _miniapp_button(message.bot.id)
+    await message.answer(text, reply_markup=kb)
 
 
 def build_dispatcher() -> Dispatcher:
