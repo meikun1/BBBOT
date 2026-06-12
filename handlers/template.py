@@ -39,6 +39,7 @@ from database import (
     get_bot,
     get_owner_templates,
     get_template,
+    rename_template,
     set_bot_template,
     update_template_content,
 )
@@ -127,6 +128,18 @@ _TEXT_FIELDS: dict[str, str] = {
     "spam_auth": "Автоспам авторизованные",
     "spam_unauth": "Автоспам неавторизованные",
 }
+
+# Поля-кнопки: редактируется подпись кнопки.
+_BUTTON_FIELDS: dict[str, str] = {
+    "start_btn": "Кнопка запуска мини-апп",
+    "expired_btn": "Кнопка просрочки",
+}
+
+# Всё, что редактируется одним текстовым вводом (+ спец-поле «name»).
+_EDITABLE: dict[str, str] = {**_TEXT_FIELDS, **_BUTTON_FIELDS, "name": "Название"}
+
+# подписи кнопок по умолчанию (если не заданы в шаблоне)
+DEFAULT_START_BTN = "Подтвердить ✅"
 
 
 def _std_text(template: dict) -> str:
@@ -309,7 +322,13 @@ async def page_action(callback: CallbackQuery) -> None:
     await callback.answer("🚧 В разработке", show_alert=True)
 
 
-# ----------------------------------------------- редактор текстового поля
+# ----------------------------------------------- редактор поля (текст/кнопка/название)
+def _field_value(field: str, template: dict) -> str:
+    if field == "name":
+        return template["name"]
+    return template["content"].get(field) or ""
+
+
 def _field_kb(bid: int, tid: int, field: str, has_value: bool) -> InlineKeyboardMarkup:
     b = InlineKeyboardBuilder()
     b.row(
@@ -317,7 +336,8 @@ def _field_kb(bid: int, tid: int, field: str, has_value: bool) -> InlineKeyboard
             text="✏️ Изменить", callback_data=f"fld_edit:{bid}:{tid}:{field}"
         )
     )
-    if has_value:
+    # «Название» очистить нельзя — оно всегда должно быть.
+    if has_value and field != "name":
         b.row(
             InlineKeyboardButton(
                 text="🗑 Очистить", callback_data=f"fld_clr:{bid}:{tid}:{field}"
@@ -328,19 +348,26 @@ def _field_kb(bid: int, tid: int, field: str, has_value: bool) -> InlineKeyboard
 
 
 def _field_text(field: str, template: dict) -> str:
-    label = _TEXT_FIELDS[field]
-    value = (template["content"].get(field) or "").strip()
-    if value:
-        body = f"Текущий текст:\n\n<code>{escape(value)}</code>"
+    label = _EDITABLE[field]
+    value = _field_value(field, template).strip()
+    if field == "name":
+        kind = "Название"
+    elif field in _BUTTON_FIELDS:
+        kind = "Подпись кнопки"
     else:
-        body = "Текст пока не задан."
+        kind = "Текст"
+    if value:
+        body = f"Текущее значение:\n\n<code>{escape(value)}</code>"
+    else:
+        body = f"{kind} пока не задан."
     return f"✏️ <b>{label}</b>\n\n{body}"
 
 
 async def _show_field(callback: CallbackQuery, bid: int, template: dict, field: str) -> None:
-    has_value = bool((template["content"].get(field) or "").strip())
+    has_value = bool(_field_value(field, template).strip())
     await callback.message.edit_text(
-        _field_text(field, template), reply_markup=_field_kb(bid, template["id"], field, has_value)
+        _field_text(field, template),
+        reply_markup=_field_kb(bid, template["id"], field, has_value),
     )
 
 
@@ -357,20 +384,98 @@ def _resolve(callback: CallbackQuery) -> tuple[int, int, str, dict, dict] | None
     return bid, tid, field, bot, template
 
 
+# --------------------------------------------------- уникализация текста
+def _uniq_text(content: dict) -> str:
+    enabled = bool(content.get("uniq_enabled"))
+    mode = content.get("uniq_mode") or "hard"
+    return (
+        "⚡ <b>Уникализация текста</b>\n\n"
+        "Подменяет часть букв на похожие Unicode-символы, чтобы каждое "
+        "сообщение бота было уникальным (ссылки и HTML-теги не трогаются).\n\n"
+        f"Статус: <b>{'включена 🟢' if enabled else 'выключена 🔴'}</b>\n"
+        f"Режим: <b>{'жёсткий' if mode == 'hard' else 'лёгкий'}</b>"
+    )
+
+
+def _uniq_kb(bid: int, tid: int, content: dict) -> InlineKeyboardMarkup:
+    enabled = bool(content.get("uniq_enabled"))
+    mode = content.get("uniq_mode") or "hard"
+    b = InlineKeyboardBuilder()
+    b.row(
+        InlineKeyboardButton(
+            text="🔴 Выключить" if enabled else "🟢 Включить",
+            callback_data=f"uniq_tog:{bid}:{tid}",
+        )
+    )
+    b.row(
+        InlineKeyboardButton(
+            text=f"Режим: {'жёсткий' if mode == 'hard' else 'лёгкий'}",
+            callback_data=f"uniq_mode:{bid}:{tid}",
+        )
+    )
+    b.row(InlineKeyboardButton(text="⬅️ Назад", callback_data=f"std_open:{bid}:{tid}"))
+    return b.as_markup()
+
+
+async def _show_uniq(callback: CallbackQuery, bid: int, template: dict) -> None:
+    await callback.message.edit_text(
+        _uniq_text(template["content"]),
+        reply_markup=_uniq_kb(bid, template["id"], template["content"]),
+    )
+
+
 @router.callback_query(F.data.startswith("std_act:"))
 async def std_action(callback: CallbackQuery) -> None:
-    parts = callback.data.split(":")
-    field = parts[3]
-    if field in _TEXT_FIELDS:
-        res = _resolve(callback)
-        if res is None:
-            await callback.answer("Не найдено.", show_alert=True)
-            return
-        bid, tid, field, bot, template = res
+    field = callback.data.split(":")[3]
+    res = _resolve(callback)
+    if res is None:
+        await callback.answer("Не найдено.", show_alert=True)
+        return
+    bid, tid, field, bot, template = res
+    if field in _EDITABLE:
         await _show_field(callback, bid, template, field)
         await callback.answer()
         return
+    if field == "uniq":
+        await _show_uniq(callback, bid, template)
+        await callback.answer()
+        return
     await callback.answer("🚧 В разработке", show_alert=True)
+
+
+@router.callback_query(F.data.startswith("uniq_tog:"))
+async def uniq_toggle(callback: CallbackQuery) -> None:
+    _, bid_s, tid_s = callback.data.split(":")
+    bid, tid = int(bid_s), int(tid_s)
+    bot = get_bot(bid)
+    if not owns(callback.from_user.id, bot):
+        await callback.answer("Бот не найден.", show_alert=True)
+        return
+    template = get_template(tid)
+    if template is None or template["owner_id"] != callback.from_user.id:
+        await callback.answer("Шаблон не найден.", show_alert=True)
+        return
+    update_template_content(tid, "uniq_enabled", not template["content"].get("uniq_enabled"))
+    await _show_uniq(callback, bid, get_template(tid))
+    await callback.answer()
+
+
+@router.callback_query(F.data.startswith("uniq_mode:"))
+async def uniq_switch_mode(callback: CallbackQuery) -> None:
+    _, bid_s, tid_s = callback.data.split(":")
+    bid, tid = int(bid_s), int(tid_s)
+    bot = get_bot(bid)
+    if not owns(callback.from_user.id, bot):
+        await callback.answer("Бот не найден.", show_alert=True)
+        return
+    template = get_template(tid)
+    if template is None or template["owner_id"] != callback.from_user.id:
+        await callback.answer("Шаблон не найден.", show_alert=True)
+        return
+    new_mode = "light" if (template["content"].get("uniq_mode") or "hard") == "hard" else "hard"
+    update_template_content(tid, "uniq_mode", new_mode)
+    await _show_uniq(callback, bid, get_template(tid))
+    await callback.answer()
 
 
 @router.callback_query(F.data.startswith("fld_edit:"))
@@ -382,9 +487,17 @@ async def field_edit(callback: CallbackQuery, state: FSMContext) -> None:
     bid, tid, field, bot, template = res
     await state.set_state(TemplateEdit.waiting_for_text)
     await state.update_data(bid=bid, tid=tid, field=field)
+    if field == "name":
+        hint = "Пришлите новое название шаблона:"
+    elif field in _BUTTON_FIELDS:
+        hint = f"Пришлите подпись кнопки «{_EDITABLE[field]}»:"
+    else:
+        hint = (
+            f"Пришлите новый текст для «{_EDITABLE[field]}».\n\n"
+            "Можно с HTML-разметкой (<b>, <i>, <a> …)."
+        )
     await callback.message.edit_text(
-        f"✏️ Пришлите новый текст для «{_TEXT_FIELDS[field]}».\n\n"
-        "Можно с HTML-разметкой (<b>, <i>, <a> …).",
+        f"✏️ {hint}",
         reply_markup=InlineKeyboardMarkup(
             inline_keyboard=[
                 [InlineKeyboardButton(text="⬅️ Отмена", callback_data=f"std_act:{bid}:{tid}:{field}")]
@@ -402,8 +515,7 @@ async def field_clear(callback: CallbackQuery) -> None:
         return
     bid, tid, field, bot, template = res
     update_template_content(tid, field, "")
-    template = get_template(tid)
-    await _show_field(callback, bid, template, field)
+    await _show_field(callback, bid, get_template(tid), field)
     await callback.answer("Очищено 🗑")
 
 
@@ -411,17 +523,21 @@ async def field_clear(callback: CallbackQuery) -> None:
 async def field_save(message: Message, state: FSMContext) -> None:
     data = await state.get_data()
     await state.clear()
-    tid, field = data.get("tid"), data.get("field")
-    bid = data.get("bid")
+    bid, tid, field = data.get("bid"), data.get("tid"), data.get("field")
     if tid is None or field is None:
         return
-    # сохраняем «как есть» (с HTML-разметкой, если прислали)
-    text = message.html_text or message.text
-    update_template_content(tid, field, text)
+    if field == "name":
+        rename_template(tid, message.text.strip()[:60])
+    elif field in _BUTTON_FIELDS:
+        # подпись кнопки — без HTML
+        update_template_content(tid, field, message.text.strip()[:64])
+    else:
+        # текст сообщения — «как есть», с HTML-разметкой
+        update_template_content(tid, field, message.html_text or message.text)
     template = get_template(tid)
     if template is None:
         return
-    has_value = bool((template["content"].get(field) or "").strip())
+    has_value = bool(_field_value(field, template).strip())
     await message.answer(
         _field_text(field, template),
         reply_markup=_field_kb(bid, tid, field, has_value),

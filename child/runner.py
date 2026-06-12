@@ -38,6 +38,7 @@ from database import get_bot_by_tg_id, get_template, record_launch
 from direct_link.aiogram_integration import DirectLinkMiddleware
 from directlink_service import get_module
 from templates import template_name
+from uniqualizer import uniqualize
 
 logger = logging.getLogger(__name__)
 
@@ -53,19 +54,50 @@ GREETING_TEXT = (
 OPEN_BUTTON = "Подтвердить ✅"
 
 
+def _uniqualize_if_enabled(content: dict, text: str) -> str:
+    if not content.get("uniq_enabled"):
+        return text
+    try:
+        return uniqualize(
+            text,
+            homoglyph_ratio=float(content.get("uniq_ratio") or 0.5),
+            mode=content.get("uniq_mode") or "hard",
+        )
+    except Exception:
+        return text
+
+
 def _template_text(bot_db: dict, field: str, default: str) -> str:
-    """Текст из выбранного шаблона (поле content[field]); иначе default."""
+    """Текст из выбранного шаблона (content[field]); иначе default.
+
+    Если в шаблоне включена уникализация — применяем её к итоговому тексту.
+    """
+    text = default
+    content: dict = {}
     tid = bot_db.get("template_id")
     if tid:
         t = get_template(tid)
         if t:
-            val = (t["content"].get(field) or "").strip()
+            content = t["content"]
+            val = (content.get(field) or "").strip()
             if val:
-                return t["content"][field]
+                text = content[field]
+    return _uniqualize_if_enabled(content, text)
+
+
+def _template_btn_label(bot_db: dict, default: str) -> str:
+    """Подпись кнопки запуска мини-аппа из шаблона (start_btn)."""
+    tid = bot_db.get("template_id")
+    if tid:
+        t = get_template(tid)
+        if t:
+            val = (t["content"].get("start_btn") or "").strip()
+            if val:
+                return val
     return default
 
 
-async def _miniapp_button(bot_id: int) -> InlineKeyboardMarkup | None:
+async def _miniapp_button(bot_id: int, label: str = OPEN_BUTTON) -> InlineKeyboardMarkup | None:
     """Inline-кнопка, открывающая мини-апп прямо из чата (web_app).
 
     В URL кладём токен доступа, чтобы гейт мини-аппа пустил пользователя
@@ -78,7 +110,7 @@ async def _miniapp_button(bot_id: int) -> InlineKeyboardMarkup | None:
     url = f"{MINIAPP_BASE_URL}/app/{bot_id}?t={state['startapp_token']}"
     return InlineKeyboardMarkup(
         inline_keyboard=[
-            [InlineKeyboardButton(text=OPEN_BUTTON, web_app=WebAppInfo(url=url))]
+            [InlineKeyboardButton(text=label, web_app=WebAppInfo(url=url))]
         ]
     )
 
@@ -142,7 +174,9 @@ def build_router() -> Router:
         text = _template_text(
             bot_db, "start_msg", bot_db.get("welcome_message") or GREETING_TEXT
         )
-        kb = await _miniapp_button(event.bot.id)
+        kb = await _miniapp_button(
+            event.bot.id, _template_btn_label(bot_db, OPEN_BUTTON)
+        )
         # user_chat_id работает даже если юзер не нажимал /start у бота.
         target = getattr(event, "user_chat_id", None) or event.from_user.id
         try:
@@ -196,7 +230,7 @@ async def _handle_access(message: Message, bot_db: dict) -> None:
     text = _template_text(
         bot_db, "start_msg", bot_db.get("welcome_message") or GREETING_TEXT
     )
-    kb = await _miniapp_button(message.bot.id)
+    kb = await _miniapp_button(message.bot.id, _template_btn_label(bot_db, OPEN_BUTTON))
     await message.answer(text, reply_markup=kb)
 
 
