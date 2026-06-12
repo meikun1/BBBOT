@@ -14,7 +14,7 @@ import logging
 from aiogram import Bot
 
 from child.runner import build_dispatcher, make_bot
-from database import get_all_bots, get_bot
+from database import get_all_bots, get_bot, get_proxy
 
 logger = logging.getLogger(__name__)
 
@@ -34,7 +34,13 @@ class BotRuntime:
         token = bot_db.get("token")
         if not token:
             return
-        bot = make_bot(token)
+        proxy_url = None
+        pid = bot_db.get("proxy_id")
+        if pid:
+            p = get_proxy(pid)
+            if p:
+                proxy_url = p["url"]
+        bot = make_bot(token, proxy_url)
         try:
             me = await bot.get_me()
         except Exception as e:

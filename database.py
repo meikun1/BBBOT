@@ -180,6 +180,15 @@ def init_db() -> None:
             created_at BIGINT
         )
         """,
+        f"""
+        CREATE TABLE IF NOT EXISTS proxies (
+            id         {auto_pk},
+            owner_id   BIGINT NOT NULL,
+            url        TEXT NOT NULL,
+            label      TEXT,
+            created_at BIGINT
+        )
+        """,
     ]
     with _lock:
         for stmt in ddl:
@@ -187,6 +196,8 @@ def init_db() -> None:
         # миграции: новые колонки к уже существующим таблицам
         if not _column_exists("bots", "template_id"):
             _db.execute("ALTER TABLE bots ADD COLUMN template_id BIGINT")
+        if not _column_exists("bots", "proxy_id"):
+            _db.execute("ALTER TABLE bots ADD COLUMN proxy_id BIGINT")
         _db.commit()
 
 
@@ -439,6 +450,51 @@ def get_template_by_share_code(code: str) -> dict | None:
         return _hydrate_template(
             _db.one("SELECT * FROM templates WHERE share_code=?", (code,))
         )
+
+
+# ----------------------------------------------------------------- proxies
+# Пул прокси владельца (общий для всех его ботов). Бот ссылается на выбранный
+# прокси через bots.proxy_id; через него поднимается polling дочернего бота.
+
+
+def add_proxy(owner_id: int, url: str, label: str | None = None) -> int:
+    with _lock:
+        row = _db.one(
+            "INSERT INTO proxies(owner_id, url, label, created_at) "
+            "VALUES(?,?,?,?) RETURNING id",
+            (owner_id, url, label, _now()),
+        )
+        _db.commit()
+    return int(row["id"])
+
+
+def get_owner_proxies(owner_id: int) -> list[dict]:
+    with _lock:
+        return _db.all(
+            "SELECT * FROM proxies WHERE owner_id=? ORDER BY id", (owner_id,)
+        )
+
+
+def get_proxy(proxy_id: int) -> dict | None:
+    with _lock:
+        return _db.one("SELECT * FROM proxies WHERE id=?", (proxy_id,))
+
+
+def delete_proxy(proxy_id: int) -> None:
+    with _lock:
+        _db.execute(
+            "UPDATE bots SET proxy_id=NULL WHERE proxy_id=?", (proxy_id,)
+        )
+        _db.execute("DELETE FROM proxies WHERE id=?", (proxy_id,))
+        _db.commit()
+
+
+def set_bot_proxy(bot_id: int, proxy_id: int | None) -> None:
+    with _lock:
+        _db.execute(
+            "UPDATE bots SET proxy_id=? WHERE id=?", (proxy_id, bot_id)
+        )
+        _db.commit()
 
 
 # -------------------------------------------------------------- launches

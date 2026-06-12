@@ -23,6 +23,7 @@ import logging
 
 from aiogram import Bot, Dispatcher, Router
 from aiogram.client.default import DefaultBotProperties
+from aiogram.client.session.aiohttp import AiohttpSession
 from aiogram.enums import ParseMode
 from aiogram.filters import CommandObject, CommandStart
 from aiogram.types import (
@@ -242,10 +243,13 @@ def build_dispatcher() -> Dispatcher:
     return dp
 
 
-def make_bot(token: str) -> Bot:
+def make_bot(token: str, proxy: str | None = None) -> Bot:
     # HTML по умолчанию, чтобы тексты шаблонов с разметкой рендерились.
+    # proxy — поднимаем сессию через прокси (socks требует aiohttp_socks).
+    session = AiohttpSession(proxy=proxy) if proxy else None
     return Bot(
         token=token,
+        session=session,
         default=DefaultBotProperties(parse_mode=ParseMode.HTML),
     )
 

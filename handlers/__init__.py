@@ -15,6 +15,7 @@ from handlers import (
     folders,
     guard,
     manage_bots,
+    proxy,
     restart,
     settings,
     start,
@@ -34,6 +35,7 @@ def setup_routers() -> Router:
     root.include_router(statistics.router)
     root.include_router(template.router)
     root.include_router(settings.router)
+    root.include_router(proxy.router)
     root.include_router(direct_link.router)
     root.include_router(broadcast.router)
     root.include_router(add_settings.router)
