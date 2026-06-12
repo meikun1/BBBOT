@@ -160,9 +160,17 @@ class DirectLinkModule:
             except InitDataError:
                 return self._stub()
 
-            # Токен берём из подписанного startapp-параметра (режим прямой
-            # ссылки) либо из тела (мини-апп открыт web_app-кнопкой бота).
-            provided = start_param or (payload.token or "")
+            if start_param:
+                # Открыто по публичной startapp-ссылке. Работает только когда
+                # «Прямая ссылка» включена — иначе ссылка «не работает».
+                if not state["enabled"]:
+                    return self._stub()
+                provided = start_param
+            else:
+                # Открыто web_app-кнопкой бота (токен в ?t=) — режим, когда
+                # бот сам ведёт пользователя; работает независимо от тумблера.
+                provided = payload.token or ""
+
             if not provided or not hmac.compare_digest(
                 provided, state["startapp_token"]
             ):
