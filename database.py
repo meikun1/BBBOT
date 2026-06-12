@@ -29,21 +29,41 @@ _lock = threading.Lock()
 
 # ----------------------------------------------------------------- бэкенд
 class _DB:
-    """Тонкая обёртка над psycopg/sqlite с единым интерфейсом."""
+    """Тонкая обёртка над psycopg/sqlite с единым интерфейсом.
+
+    Соединение умеет восстанавливаться: serverless-Postgres (Neon) закрывает
+    простаивающие коннекты, поэтому при ошибке соединения переподключаемся и
+    повторяем запрос один раз.
+    """
 
     def __init__(self) -> None:
+        self._connect()
+
+    def _connect(self) -> None:
         if DATABASE_URL:
             import psycopg
             from psycopg.rows import dict_row
 
             self.kind = "pg"
+            self._conn_errors: tuple[type[Exception], ...] = (
+                psycopg.OperationalError,
+                psycopg.InterfaceError,
+            )
             self.conn = psycopg.connect(
-                DATABASE_URL, autocommit=True, row_factory=dict_row
+                DATABASE_URL,
+                autocommit=True,
+                row_factory=dict_row,
+                # держим соединение живым, чтобы реже ловить простой-таймаут
+                keepalives=1,
+                keepalives_idle=30,
+                keepalives_interval=10,
+                keepalives_count=5,
             )
         else:
             import sqlite3
 
             self.kind = "sqlite"
+            self._conn_errors = (sqlite3.OperationalError, sqlite3.ProgrammingError)
             self.conn = sqlite3.connect(DB_PATH, check_same_thread=False)
             self.conn.row_factory = sqlite3.Row
 
@@ -51,9 +71,16 @@ class _DB:
         return sql.replace("?", "%s") if self.kind == "pg" else sql
 
     def execute(self, sql: str, params: tuple = ()):  # noqa: ANN001
-        cur = self.conn.cursor()
-        cur.execute(self._q(sql), params)
-        return cur
+        try:
+            cur = self.conn.cursor()
+            cur.execute(self._q(sql), params)
+            return cur
+        except self._conn_errors:
+            # соединение оборвалось — переподключаемся и повторяем один раз
+            self._connect()
+            cur = self.conn.cursor()
+            cur.execute(self._q(sql), params)
+            return cur
 
     def commit(self) -> None:
         # для PG с autocommit=True это no-op, для sqlite — реальный commit
