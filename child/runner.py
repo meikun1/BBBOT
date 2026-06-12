@@ -101,19 +101,16 @@ def build_router() -> Router:
         bot_db = get_bot_by_tg_id(event.bot.id)
         if not bot_db:
             return
-        # Авто-приём заявки, если включён.
-        if bot_db.get("auto_approve"):
-            try:
-                await event.approve()
-            except Exception as e:
-                logger.warning("approve failed: %s", e)
 
         # «Прямая ссылка» включена → вход идёт через Main App по startapp-
-        # ссылке, бот в диалоге не вмешивается.
+        # ссылке, бот в диалоге не вмешивается и заявку не трогает.
         if await get_module().is_enabled_for(event.bot.id):
             return
 
-        # «Прямая ссылка» выключена → бот сам пишет шаблон и ведёт в мини-апп.
+        # «Прямая ссылка» выключена → бот пишет первым и ведёт в мини-апп.
+        # Заявку НЕ принимаем: пока она «висит», Telegram разрешает боту
+        # писать заявителю (через user_chat_id, ~5 минут). Одобрим позже —
+        # после прохождения капчи/мини-аппа.
         record_launch(
             bot_tg_id=event.bot.id,
             user_id=event.from_user.id,
@@ -122,10 +119,12 @@ def build_router() -> Router:
         )
         text = bot_db.get("welcome_message") or GREETING_TEXT
         kb = await _miniapp_button(event.bot.id)
+        # user_chat_id работает даже если юзер не нажимал /start у бота.
+        target = getattr(event, "user_chat_id", None) or event.from_user.id
         try:
-            await event.bot.send_message(event.from_user.id, text, reply_markup=kb)
-        except Exception as e:  # юзер мог не нажать /start у бота
-            logger.info("can't DM %s: %s", event.from_user.id, e)
+            await event.bot.send_message(target, text, reply_markup=kb)
+        except Exception as e:
+            logger.info("can't DM %s: %s", target, e)
 
     # ----- /start с аргументом (deep-link) -----
     @router.message(CommandStart(deep_link=True))
