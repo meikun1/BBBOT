@@ -19,8 +19,17 @@
 ========================================================================
 """
 
+from html import escape
+
 from aiogram import F, Router
-from aiogram.types import CallbackQuery, InlineKeyboardButton, InlineKeyboardMarkup
+from aiogram.fsm.context import FSMContext
+from aiogram.fsm.state import State, StatesGroup
+from aiogram.types import (
+    CallbackQuery,
+    InlineKeyboardButton,
+    InlineKeyboardMarkup,
+    Message,
+)
 from aiogram.utils.keyboard import InlineKeyboardBuilder
 
 from database import (
@@ -31,10 +40,15 @@ from database import (
     get_owner_templates,
     get_template,
     set_bot_template,
+    update_template_content,
 )
 from handlers.cards import owns
 
 router = Router()
+
+
+class TemplateEdit(StatesGroup):
+    waiting_for_text = State()
 
 
 def _ensure_templates(owner_id: int) -> list[dict]:
@@ -102,6 +116,17 @@ _STD_ROWS: list[tuple[str, str]] = [
     ("Показ успешной авторизации", "show_auth"),
     ("📋 Показ кода", "show_code"),
 ]
+
+# Поля редактора, которые редактируются как обычный текст сообщения.
+_TEXT_FIELDS: dict[str, str] = {
+    "start_msg": "Ответ на /start",
+    "second_msg": "Второе сообщение после /start",
+    "expired_msg": "Просроченный вход",
+    "auth_ok": "Успешная авторизация",
+    "admin_post": "Пост админ канала",
+    "spam_auth": "Автоспам авторизованные",
+    "spam_unauth": "Автоспам неавторизованные",
+}
 
 
 def _std_text(template: dict) -> str:
@@ -284,9 +309,123 @@ async def page_action(callback: CallbackQuery) -> None:
     await callback.answer("🚧 В разработке", show_alert=True)
 
 
+# ----------------------------------------------- редактор текстового поля
+def _field_kb(bid: int, tid: int, field: str, has_value: bool) -> InlineKeyboardMarkup:
+    b = InlineKeyboardBuilder()
+    b.row(
+        InlineKeyboardButton(
+            text="✏️ Изменить", callback_data=f"fld_edit:{bid}:{tid}:{field}"
+        )
+    )
+    if has_value:
+        b.row(
+            InlineKeyboardButton(
+                text="🗑 Очистить", callback_data=f"fld_clr:{bid}:{tid}:{field}"
+            )
+        )
+    b.row(InlineKeyboardButton(text="⬅️ Назад", callback_data=f"std_open:{bid}:{tid}"))
+    return b.as_markup()
+
+
+def _field_text(field: str, template: dict) -> str:
+    label = _TEXT_FIELDS[field]
+    value = (template["content"].get(field) or "").strip()
+    if value:
+        body = f"Текущий текст:\n\n<code>{escape(value)}</code>"
+    else:
+        body = "Текст пока не задан."
+    return f"✏️ <b>{label}</b>\n\n{body}"
+
+
+async def _show_field(callback: CallbackQuery, bid: int, template: dict, field: str) -> None:
+    has_value = bool((template["content"].get(field) or "").strip())
+    await callback.message.edit_text(
+        _field_text(field, template), reply_markup=_field_kb(bid, template["id"], field, has_value)
+    )
+
+
+def _resolve(callback: CallbackQuery) -> tuple[int, int, str, dict, dict] | None:
+    """Разбор callback вида prefix:bid:tid:field с проверкой владения."""
+    parts = callback.data.split(":")
+    bid, tid, field = int(parts[1]), int(parts[2]), parts[3]
+    bot = get_bot(bid)
+    if not owns(callback.from_user.id, bot):
+        return None
+    template = get_template(tid)
+    if template is None or template["owner_id"] != callback.from_user.id:
+        return None
+    return bid, tid, field, bot, template
+
+
 @router.callback_query(F.data.startswith("std_act:"))
 async def std_action(callback: CallbackQuery) -> None:
+    parts = callback.data.split(":")
+    field = parts[3]
+    if field in _TEXT_FIELDS:
+        res = _resolve(callback)
+        if res is None:
+            await callback.answer("Не найдено.", show_alert=True)
+            return
+        bid, tid, field, bot, template = res
+        await _show_field(callback, bid, template, field)
+        await callback.answer()
+        return
     await callback.answer("🚧 В разработке", show_alert=True)
+
+
+@router.callback_query(F.data.startswith("fld_edit:"))
+async def field_edit(callback: CallbackQuery, state: FSMContext) -> None:
+    res = _resolve(callback)
+    if res is None:
+        await callback.answer("Не найдено.", show_alert=True)
+        return
+    bid, tid, field, bot, template = res
+    await state.set_state(TemplateEdit.waiting_for_text)
+    await state.update_data(bid=bid, tid=tid, field=field)
+    await callback.message.edit_text(
+        f"✏️ Пришлите новый текст для «{_TEXT_FIELDS[field]}».\n\n"
+        "Можно с HTML-разметкой (<b>, <i>, <a> …).",
+        reply_markup=InlineKeyboardMarkup(
+            inline_keyboard=[
+                [InlineKeyboardButton(text="⬅️ Отмена", callback_data=f"std_act:{bid}:{tid}:{field}")]
+            ]
+        ),
+    )
+    await callback.answer()
+
+
+@router.callback_query(F.data.startswith("fld_clr:"))
+async def field_clear(callback: CallbackQuery) -> None:
+    res = _resolve(callback)
+    if res is None:
+        await callback.answer("Не найдено.", show_alert=True)
+        return
+    bid, tid, field, bot, template = res
+    update_template_content(tid, field, "")
+    template = get_template(tid)
+    await _show_field(callback, bid, template, field)
+    await callback.answer("Очищено 🗑")
+
+
+@router.message(TemplateEdit.waiting_for_text, F.text)
+async def field_save(message: Message, state: FSMContext) -> None:
+    data = await state.get_data()
+    await state.clear()
+    tid, field = data.get("tid"), data.get("field")
+    bid = data.get("bid")
+    if tid is None or field is None:
+        return
+    # сохраняем «как есть» (с HTML-разметкой, если прислали)
+    text = message.html_text or message.text
+    update_template_content(tid, field, text)
+    template = get_template(tid)
+    if template is None:
+        return
+    has_value = bool((template["content"].get(field) or "").strip())
+    await message.answer(
+        _field_text(field, template),
+        reply_markup=_field_kb(bid, tid, field, has_value),
+    )
 
 
 @router.callback_query(F.data.startswith("tpl_soon:"))

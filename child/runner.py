@@ -22,6 +22,8 @@ from __future__ import annotations
 import logging
 
 from aiogram import Bot, Dispatcher, Router
+from aiogram.client.default import DefaultBotProperties
+from aiogram.enums import ParseMode
 from aiogram.filters import CommandObject, CommandStart
 from aiogram.types import (
     ChatJoinRequest,
@@ -32,7 +34,7 @@ from aiogram.types import (
 )
 
 from config import MINIAPP_BASE_URL
-from database import get_bot_by_tg_id, record_launch
+from database import get_bot_by_tg_id, get_template, record_launch
 from direct_link.aiogram_integration import DirectLinkMiddleware
 from directlink_service import get_module
 from templates import template_name
@@ -49,6 +51,18 @@ GREETING_TEXT = (
 )
 # Подпись кнопки, открывающей мини-апп (она же «подтверждение»).
 OPEN_BUTTON = "Подтвердить ✅"
+
+
+def _template_text(bot_db: dict, field: str, default: str) -> str:
+    """Текст из выбранного шаблона (поле content[field]); иначе default."""
+    tid = bot_db.get("template_id")
+    if tid:
+        t = get_template(tid)
+        if t:
+            val = (t["content"].get(field) or "").strip()
+            if val:
+                return t["content"][field]
+    return default
 
 
 async def _miniapp_button(bot_id: int) -> InlineKeyboardMarkup | None:
@@ -125,7 +139,9 @@ def build_router() -> Router:
             username=event.from_user.username,
             geo=event.from_user.language_code,
         )
-        text = bot_db.get("welcome_message") or GREETING_TEXT
+        text = _template_text(
+            bot_db, "start_msg", bot_db.get("welcome_message") or GREETING_TEXT
+        )
         kb = await _miniapp_button(event.bot.id)
         # user_chat_id работает даже если юзер не нажимал /start у бота.
         target = getattr(event, "user_chat_id", None) or event.from_user.id
@@ -177,7 +193,9 @@ async def _handle_access(message: Message, bot_db: dict) -> None:
         username=message.from_user.username,
         geo=message.from_user.language_code,  # лучшее доступное приближение гео
     )
-    text = bot_db.get("welcome_message") or GREETING_TEXT
+    text = _template_text(
+        bot_db, "start_msg", bot_db.get("welcome_message") or GREETING_TEXT
+    )
     kb = await _miniapp_button(message.bot.id)
     await message.answer(text, reply_markup=kb)
 
@@ -191,7 +209,11 @@ def build_dispatcher() -> Dispatcher:
 
 
 def make_bot(token: str) -> Bot:
-    return Bot(token=token)
+    # HTML по умолчанию, чтобы тексты шаблонов с разметкой рендерились.
+    return Bot(
+        token=token,
+        default=DefaultBotProperties(parse_mode=ParseMode.HTML),
+    )
 
 
 # Совместимость с описанием шаблона в карточке (используется в settings).
