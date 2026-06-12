@@ -16,6 +16,7 @@
 """
 
 from aiogram import F, Router
+from aiogram.exceptions import TelegramBadRequest
 from aiogram.types import (
     CallbackQuery,
     InlineKeyboardButton,
@@ -50,33 +51,15 @@ async def _render(callback: CallbackQuery, bot: dict) -> None:
     manual_url = module.config.manual_url
     enabled = state["enabled"]
 
-    from config import MINIAPP_BASE_URL
-
-    if MINIAPP_BASE_URL:
-        webapp_url = f"{MINIAPP_BASE_URL}/app/{tg_id}"
-        webapp_block = (
-            "🌐 Web App URL для @BotFather (Bot Settings → Configure Mini App):\n"
-            f"<code>{webapp_url}</code>\n\n"
-        )
-    else:
-        webapp_block = (
-            "🌐 Web App URL: задайте переменную <code>MINIAPP_BASE_URL</code> "
-            "(HTTPS-домен), чтобы получить ссылку для @BotFather.\n\n"
-        )
-
     text = (
         "🔗 <b>Прямая ссылка</b>\n\n"
-        "🔴 <b>Выключено</b> — бот работает сам: на заявку в канал и на "
-        "<code>/start</code> он пишет приветствие и даёт кнопку, которая "
-        "открывает мини-апп прямо в чате. Настройка в @BotFather не нужна.\n\n"
-        "🟢 <b>Включено</b> — вход только через мини-апп по startapp-ссылке. "
-        "Бот перестаёт реагировать на <code>/start</code>. Нужно один раз "
-        "вставить Web App URL в @BotFather (Bot Settings → Configure Mini App "
-        f'→ <b>Main App</b>), см. <a href="{manual_url}">мануал</a>. Тогда по '
-        "ссылке-приглашению мини-апп откроется сразу. Изменения в BotFather "
-        "подхватываются ~10–15 минут.\n\n"
-        f"{webapp_block}"
-        f"🔗 Прямая ссылка на мини-апп (для юзеров):\n{startapp_url}\n\n"
+        "❓ Для включения необходимо установить через @BotFather мини-апп "
+        f'ссылку на бота. Посмотрите <a href="{manual_url}">мануал как '
+        "правильно это сделать</a>. После установки ссылки в ботфазере, "
+        "прямая ссылка начнёт работать через 10-15 минут.\n\n"
+        f"🔗 Прямая ссылка на мини-апп: {startapp_url}\n\n"
+        "✳️ Вы можете отметить, что бот использует прямую ссылку, тогда он "
+        "перестанет отвечать на /start\n\n"
         f"Статус: <b>{'🟢 включено' if enabled else '🔴 выключено'}</b>"
     )
 
@@ -91,9 +74,13 @@ async def _render(callback: CallbackQuery, bot: dict) -> None:
             ],
         ]
     )
-    await callback.message.edit_text(
-        text, reply_markup=kb, disable_web_page_preview=True
-    )
+    try:
+        await callback.message.edit_text(
+            text, reply_markup=kb, disable_web_page_preview=True
+        )
+    except TelegramBadRequest:
+        # «message is not modified» и т.п. — не критично
+        pass
 
 
 @router.callback_query(F.data.startswith("dl:"))
@@ -118,10 +105,11 @@ async def toggle_direct_link(callback: CallbackQuery) -> None:
         return
     module = get_module()
     state = await module.get_or_init(tg_id)
-    await module.storage.set_enabled(tg_id, not state["enabled"])
+    new_enabled = not state["enabled"]
+    await module.storage.set_enabled(tg_id, new_enabled)
     # Зеркалим статус в карточку бота.
     from database import update_bot_field
 
-    update_bot_field(bot["id"], "miniapp_enabled", 0 if state["enabled"] else 1)
+    update_bot_field(bot["id"], "miniapp_enabled", 1 if new_enabled else 0)
     await _render(callback, bot)
-    await callback.answer("Готово ✅")
+    await callback.answer("🟢 Включено" if new_enabled else "🔴 Выключено")
