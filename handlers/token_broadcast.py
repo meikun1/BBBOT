@@ -8,8 +8,10 @@
 """
 
 import asyncio
+from contextlib import suppress
 
 from aiogram import Bot, F, Router
+from aiogram.exceptions import TelegramBadRequest
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
 from aiogram.types import (
@@ -20,6 +22,7 @@ from aiogram.types import (
 )
 
 from database import get_bot_user_ids, get_user_bots
+from handlers.ui import remember_anchor
 
 router = Router()
 
@@ -43,6 +46,7 @@ async def start(callback: CallbackQuery, state: FSMContext) -> None:
         await callback.answer("У вас пока нет ботов.", show_alert=True)
         return
     await state.set_state(TokenBroadcast.waiting_for_text)
+    await remember_anchor(callback, state)
     await callback.message.edit_text(
         "📣 <b>Рассылка по токенам</b>\n\n"
         f"Сообщение уйдёт через все ваши боты ({len(bots)} шт.) их юзерам.\n\n"
@@ -54,11 +58,26 @@ async def start(callback: CallbackQuery, state: FSMContext) -> None:
 
 @router.message(TokenBroadcast.waiting_for_text, F.text)
 async def run(message: Message, state: FSMContext) -> None:
+    data = await state.get_data()
     await state.clear()
+    chat = data.get("_anchor_chat")
+    mid = data.get("_anchor_msg")
+    with suppress(Exception):
+        await message.delete()
+
+    async def show(text: str, kb: InlineKeyboardMarkup | None = None) -> None:
+        if chat and mid:
+            with suppress(TelegramBadRequest):
+                await message.bot.edit_message_text(
+                    text, chat_id=chat, message_id=mid, reply_markup=kb
+                )
+                return
+        await message.answer(text, reply_markup=kb)
+
     bots = get_user_bots(message.from_user.id)
     text = message.text
 
-    status = await message.answer("Запускаю рассылку по токенам… ⏳")
+    await show("Запускаю рассылку по токенам… ⏳")
     total_sent = total_failed = 0
 
     for bot in bots:
@@ -80,8 +99,8 @@ async def run(message: Message, state: FSMContext) -> None:
         finally:
             await child.session.close()
 
-    await status.edit_text(
+    await show(
         f"✅ Рассылка по токенам завершена.\n\n"
         f"Доставлено: {total_sent}\nНе доставлено: {total_failed}",
-        reply_markup=_back_kb(),
+        _back_kb(),
     )

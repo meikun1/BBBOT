@@ -33,6 +33,7 @@ from database import (
     set_bot_proxy,
 )
 from handlers.cards import owns
+from handlers.ui import edit_anchor, remember_anchor
 
 router = Router()
 
@@ -179,6 +180,7 @@ async def ask_proxy(callback: CallbackQuery, state: FSMContext) -> None:
         return
     await state.set_state(Proxy.waiting_for_proxy)
     await state.update_data(bid=bid)
+    await remember_anchor(callback, state)
     await callback.message.edit_text(
         "➕ Пришлите прокси (можно несколько, по одному в строке):\n\n"
         "<code>socks5://user:pass@host:port</code>\n"
@@ -212,4 +214,6 @@ async def save_proxy(message: Message, state: FSMContext) -> None:
     note = f"✅ Добавлено прокси: {added}"
     if bad:
         note += f"\n⚠️ Не распознано строк: {bad}"
-    await message.answer(note, reply_markup=_kb(bot, proxies) if bot else None)
+    if bot:
+        note += "\n\n" + _text(bot, proxies)
+    await edit_anchor(message, data, note, _kb(bot, proxies) if bot else None)

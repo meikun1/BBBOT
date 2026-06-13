@@ -20,6 +20,7 @@ from aiogram.types import (
 
 from database import get_bot, update_bot_field
 from handlers.cards import owns
+from handlers.ui import edit_anchor, remember_anchor
 
 router = Router()
 
@@ -88,6 +89,7 @@ async def ask_name(callback: CallbackQuery, state: FSMContext) -> None:
         return
     await state.set_state(Settings.waiting_for_name)
     await state.update_data(bot_id=bot_id)
+    await remember_anchor(callback, state)
     await callback.message.edit_text(
         "✏️ Пришлите новое имя бота (отображаемое имя, не username):",
         reply_markup=InlineKeyboardMarkup(
@@ -122,13 +124,17 @@ async def save_name(message: Message, state: FSMContext) -> None:
         await child.session.close()
 
     if ok:
-        await message.answer(
+        await edit_anchor(
+            message,
+            data,
             f"✅ Имя бота изменено на: <b>{new_name}</b>",
-            reply_markup=_settings_kb(bot_id),
+            _settings_kb(bot_id),
         )
     else:
-        await message.answer(
+        await edit_anchor(
+            message,
+            data,
             f"⚠️ Не удалось изменить имя: {err}\n"
             "Telegram разрешает менять имя не чаще раза в сутки.",
-            reply_markup=_settings_kb(bot_id),
+            _settings_kb(bot_id),
         )

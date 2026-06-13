@@ -8,8 +8,10 @@
 """
 
 import asyncio
+from contextlib import suppress
 
 from aiogram import Bot, F, Router
+from aiogram.exceptions import TelegramBadRequest
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
 from aiogram.types import (
@@ -21,6 +23,7 @@ from aiogram.types import (
 
 from database import get_bot, get_bot_user_ids
 from handlers.cards import owns
+from handlers.ui import remember_anchor
 
 router = Router()
 
@@ -47,6 +50,7 @@ async def start_broadcast(callback: CallbackQuery, state: FSMContext) -> None:
     audience = len(get_bot_user_ids(bot.get("tg_id"))) if bot.get("tg_id") else 0
     await state.set_state(Broadcast.waiting_for_text)
     await state.update_data(bot_id=bot_id)
+    await remember_anchor(callback, state)
     await callback.message.edit_text(
         f"📨 <b>Рассылка</b> — {bot['username']}\n\n"
         f"Аудитория: <b>{audience}</b> чел.\n\n"
@@ -61,22 +65,36 @@ async def do_broadcast(message: Message, state: FSMContext) -> None:
     data = await state.get_data()
     bot_id = data["bot_id"]
     await state.clear()
+    chat = data.get("_anchor_chat")
+    mid = data.get("_anchor_msg")
+
+    # всё происходит в одном (anchor) сообщении; ввод пользователя убираем
+    with suppress(Exception):
+        await message.delete()
+
+    async def show(text: str, kb: InlineKeyboardMarkup | None = None) -> None:
+        if chat and mid:
+            with suppress(TelegramBadRequest):
+                await message.bot.edit_message_text(
+                    text, chat_id=chat, message_id=mid, reply_markup=kb
+                )
+                return
+        await message.answer(text, reply_markup=kb)
 
     bot = get_bot(bot_id)
     if not bot or not bot.get("tg_id"):
-        await message.answer("Бот не найден.")
+        await show("Бот не найден.")
         return
 
     user_ids = get_bot_user_ids(bot["tg_id"])
     if not user_ids:
-        await message.answer(
-            "Некому отправлять — бота ещё никто не запускал.",
-            reply_markup=_back_kb(bot_id),
+        await show(
+            "Некому отправлять — бота ещё никто не запускал.", _back_kb(bot_id)
         )
         return
 
     text = message.text
-    status = await message.answer(f"Отправляю… 0/{len(user_ids)}")
+    await show(f"Отправляю… 0/{len(user_ids)}")
 
     child = Bot(token=bot["token"])
     sent = failed = 0
@@ -88,15 +106,12 @@ async def do_broadcast(message: Message, state: FSMContext) -> None:
             except Exception:
                 failed += 1
             if i % 25 == 0:
-                try:
-                    await status.edit_text(f"Отправляю… {i}/{len(user_ids)}")
-                except Exception:
-                    pass
+                await show(f"Отправляю… {i}/{len(user_ids)}")
             await asyncio.sleep(0.05)  # бережём лимиты Telegram
     finally:
         await child.session.close()
 
-    await status.edit_text(
+    await show(
         f"✅ Рассылка завершена.\n\nДоставлено: {sent}\nНе доставлено: {failed}",
-        reply_markup=_back_kb(bot_id),
+        _back_kb(bot_id),
     )

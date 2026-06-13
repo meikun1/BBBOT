@@ -27,6 +27,7 @@ from database import (
     get_user_bots,
     update_bot_field,
 )
+from handlers.ui import edit_anchor, remember_anchor
 
 router = Router()
 
@@ -62,6 +63,7 @@ async def show_folders(callback: CallbackQuery) -> None:
 @router.callback_query(F.data == "folder_new")
 async def new_folder(callback: CallbackQuery, state: FSMContext) -> None:
     await state.set_state(Folders.waiting_for_name)
+    await remember_anchor(callback, state)
     await callback.message.edit_text(
         "➕ Пришлите название новой папки:",
         reply_markup=InlineKeyboardMarkup(
@@ -75,10 +77,12 @@ async def new_folder(callback: CallbackQuery, state: FSMContext) -> None:
 
 @router.message(Folders.waiting_for_name, F.text)
 async def save_folder(message: Message, state: FSMContext) -> None:
-    add_folder(message.from_user.id, message.text.strip()[:40])
+    data = await state.get_data()
     await state.clear()
+    add_folder(message.from_user.id, message.text.strip()[:40])
     folders = get_folders(message.from_user.id)
-    await message.answer("✅ Папка создана!", reply_markup=_folders_kb(folders))
+    text = "📁 <b>Папки ботов</b>\n\n✅ Папка создана!"
+    await edit_anchor(message, data, text, _folders_kb(folders))
 
 
 # --------------------------------------------------- содержимое одной папки

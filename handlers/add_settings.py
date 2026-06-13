@@ -21,6 +21,7 @@ from aiogram.types import (
 from aiogram.utils.keyboard import InlineKeyboardBuilder
 
 from database import get_bot, get_user_bots, update_bot_field
+from handlers.ui import edit_anchor, remember_anchor
 
 router = Router()
 
@@ -117,6 +118,7 @@ async def ask_welcome(callback: CallbackQuery, state: FSMContext) -> None:
         return
     await state.set_state(AddSettings.waiting_for_welcome)
     await state.update_data(bot_id=bot_id)
+    await remember_anchor(callback, state)
     await callback.message.edit_text(
         "✏️ Пришлите текст приветствия, которое бот отправит человеку при заявке:",
         reply_markup=InlineKeyboardMarkup(
@@ -132,11 +134,13 @@ async def ask_welcome(callback: CallbackQuery, state: FSMContext) -> None:
 async def save_welcome(message: Message, state: FSMContext) -> None:
     data = await state.get_data()
     bot_id = data["bot_id"]
-    update_bot_field(bot_id, "welcome_message", message.text.strip())
     await state.clear()
+    update_bot_field(bot_id, "welcome_message", message.text.strip())
 
     bot = get_bot(bot_id)
-    await message.answer(
+    await edit_anchor(
+        message,
+        data,
         "✅ Приветствие сохранено!\n\n" + _settings_text(bot),
-        reply_markup=_settings_kb(bot),
+        _settings_kb(bot),
     )

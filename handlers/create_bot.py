@@ -22,6 +22,7 @@ from aiogram.types import (
 
 from child.runtime import get_runtime
 from database import add_bot, get_bot, token_exists, update_bot_field
+from handlers.ui import edit_anchor, remember_anchor
 
 router = Router()
 
@@ -44,6 +45,7 @@ def _cancel_kb() -> InlineKeyboardMarkup:
 @router.callback_query(F.data == "create_bot")
 async def start_create(callback: CallbackQuery, state: FSMContext) -> None:
     await state.set_state(CreateBot.waiting_for_token)
+    await remember_anchor(callback, state)
     await callback.message.edit_text(
         "⚙️ <b>Создание бота</b>\n\n"
         "1. Откройте @BotFather и отправьте <code>/newbot</code>\n"
@@ -57,17 +59,23 @@ async def start_create(callback: CallbackQuery, state: FSMContext) -> None:
 
 @router.message(CreateBot.waiting_for_token, F.text)
 async def receive_token(message: Message, state: FSMContext) -> None:
+    data = await state.get_data()
     token = message.text.strip()
 
     if not TOKEN_RE.match(token):
-        await message.answer(
+        # ошибка — оставляем ожидание токена, показываем в anchor
+        await edit_anchor(
+            message,
+            data,
             "❌ Это не похоже на токен. Пришлите токен от @BotFather целиком.",
-            reply_markup=_cancel_kb(),
+            _cancel_kb(),
         )
         return
 
     if token_exists(token):
-        await message.answer("⚠️ Этот бот уже добавлен.", reply_markup=_cancel_kb())
+        await edit_anchor(
+            message, data, "⚠️ Этот бот уже добавлен.", _cancel_kb()
+        )
         return
 
     # Проверяем токен «вживую» через Telegram.
@@ -75,9 +83,11 @@ async def receive_token(message: Message, state: FSMContext) -> None:
     try:
         me = await child_bot.get_me()
     except TelegramUnauthorizedError:
-        await message.answer(
+        await edit_anchor(
+            message,
+            data,
             "❌ Токен недействителен (отклонён Telegram). Проверьте и пришлите снова.",
-            reply_markup=_cancel_kb(),
+            _cancel_kb(),
         )
         return
     finally:
@@ -94,11 +104,13 @@ async def receive_token(message: Message, state: FSMContext) -> None:
     # Поднимаем бота сразу.
     await get_runtime().start_bot_db(get_bot(bot_id))
 
-    await message.answer(
+    await edit_anchor(
+        message,
+        data,
         f"✅ Бот <b>@{me.username}</b> успешно добавлен и запущен!\n\n"
         "Теперь добавьте его в админы вашего закрытого канала, "
         "и настройте обработку заявок в разделе «Настройки добавления».",
-        reply_markup=InlineKeyboardMarkup(
+        InlineKeyboardMarkup(
             inline_keyboard=[
                 [InlineKeyboardButton(text="⬅️ В главное меню", callback_data="main_menu")]
             ]

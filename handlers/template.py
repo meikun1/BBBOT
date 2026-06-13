@@ -47,6 +47,7 @@ from database import (
     update_template_content,
 )
 from handlers.cards import owns
+from handlers.ui import edit_anchor, remember_anchor
 
 router = Router()
 
@@ -563,6 +564,7 @@ async def add_by_code(callback: CallbackQuery, state: FSMContext) -> None:
         return
     await state.set_state(TemplateEdit.waiting_for_code)
     await state.update_data(bid=bid)
+    await remember_anchor(callback, state)
     await callback.message.edit_text(
         "📥 Пришлите код шаблона, которым с вами поделились:",
         reply_markup=InlineKeyboardMarkup(
@@ -582,8 +584,13 @@ async def code_save(message: Message, state: FSMContext) -> None:
     code = message.text.strip()
     src = get_template_by_share_code(code)
     if src is None:
-        await message.answer(
-            "❌ Шаблон с таким кодом не найден. Проверьте код и попробуйте снова.",
+        bot = get_bot(bid) if bid else None
+        templates = _ensure_templates(message.from_user.id) if bot else []
+        await edit_anchor(
+            message,
+            data,
+            "❌ Шаблон с таким кодом не найден.\n\n📋 <b>Меню шаблонов:</b>",
+            _menu_kb(bot, templates) if bot else None,
         )
         return
     # создаём собственную копию шаблона у текущего владельца
@@ -593,13 +600,13 @@ async def code_save(message: Message, state: FSMContext) -> None:
     if bid:
         set_bot_template(bid, new_id)
     bot = get_bot(bid) if bid else None
-    if bot:
-        templates = _ensure_templates(message.from_user.id)
-        await message.answer(
-            "✅ Шаблон добавлен!", reply_markup=_menu_kb(bot, templates)
-        )
-    else:
-        await message.answer("✅ Шаблон добавлен!")
+    templates = _ensure_templates(message.from_user.id) if bot else []
+    await edit_anchor(
+        message,
+        data,
+        "✅ Шаблон добавлен!\n\n📋 <b>Меню шаблонов:</b>",
+        _menu_kb(bot, templates) if bot else None,
+    )
 
 
 @router.callback_query(F.data.startswith("uniq_tog:"))
@@ -646,6 +653,7 @@ async def field_edit(callback: CallbackQuery, state: FSMContext) -> None:
     bid, tid, field, bot, template = res
     await state.set_state(TemplateEdit.waiting_for_text)
     await state.update_data(bid=bid, tid=tid, field=field)
+    await remember_anchor(callback, state)
     if field == "name":
         hint = "Пришлите новое название шаблона:"
     elif field in _BUTTON_FIELDS:
@@ -697,9 +705,11 @@ async def field_save(message: Message, state: FSMContext) -> None:
     if template is None:
         return
     has_value = bool(_field_value(field, template).strip())
-    await message.answer(
+    await edit_anchor(
+        message,
+        data,
         _field_text(field, template),
-        reply_markup=_field_kb(bid, tid, field, has_value),
+        _field_kb(bid, tid, field, has_value),
     )
 
 
