@@ -30,6 +30,7 @@ from aiogram.types import (
     ChatJoinRequest,
     InlineKeyboardButton,
     InlineKeyboardMarkup,
+    MenuButtonDefault,
     MenuButtonWebApp,
     Message,
     WebAppInfo,
@@ -117,17 +118,22 @@ async def _set_menu_button(bot: Bot, chat_id: int, bot_id: int, label: str) -> N
 
     Ставит персональную (per-chat) web_app-кнопку с токеном доступа, чтобы
     гейт мини-аппа пустил пользователя. Нужен публичный MINIAPP_BASE_URL.
-    Если адрес веба не задан — кнопку меню не трогаем: её роль играет
-    Main App, настроенный в BotFather.
+
+    Если адрес веба не задан — сбрасываем кнопку меню чата в дефолт
+    (MenuButtonDefault): это убирает любую ранее поставленную битую web_app-
+    кнопку и отдаёт меню под Main App, настроенный в BotFather.
     """
     url = await _miniapp_url(bot_id)
-    if url is None:
-        return
     try:
-        await bot.set_chat_menu_button(
-            chat_id=chat_id,
-            menu_button=MenuButtonWebApp(text=label, web_app=WebAppInfo(url=url)),
-        )
+        if url is None:
+            await bot.set_chat_menu_button(
+                chat_id=chat_id, menu_button=MenuButtonDefault()
+            )
+        else:
+            await bot.set_chat_menu_button(
+                chat_id=chat_id,
+                menu_button=MenuButtonWebApp(text=label, web_app=WebAppInfo(url=url)),
+            )
     except Exception as e:
         logger.warning("set menu button for %s failed: %s", chat_id, e)
 
