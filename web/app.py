@@ -38,8 +38,10 @@ def _miniapp_config(bot_id: int) -> dict:
             cfg["color"] = c.get("ui_color") or ""
             cfg["bg"] = c.get("bg") or ""
             cfg["blur"] = int(c.get("blur") or 0)
-            cfg["main"] = c.get("page_main") or ""
-            cfg["success"] = c.get("page_success") or ""
+            # под-поля страниц (main_text/success_text), с откатом на старый
+            # одиночный ключ страницы (page_main/page_success) для совместимости
+            cfg["main"] = c.get("main_text") or c.get("page_main") or ""
+            cfg["success"] = c.get("success_text") or c.get("page_success") or ""
     return cfg
 
 
