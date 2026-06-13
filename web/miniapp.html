@@ -206,10 +206,23 @@
       nextStep();
     }
 
+    // Единая анимация загрузки между страницами (одинаковая для всех
+    // шаблонов, показывается автоматически при каждом переходе).
+    var LOADING_MS = 700;
+
+    function showLoading() {
+      html('<div class="spinner"></div>');
+      window.scrollTo(0, 0);
+    }
+
     function nextStep() {
       if (step < PAGES.length - 1) {
-        step += 1;
-        renderStep(step);
+        var nextIdx = step + 1;
+        showLoading();
+        setTimeout(function () {
+          step = nextIdx;
+          renderStep(step);
+        }, LOADING_MS);
       } else {
         var tg = tgApp();
         if (tg && tg.close) tg.close();
