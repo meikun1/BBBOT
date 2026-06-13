@@ -231,10 +231,11 @@ async def _send_start_flow(bot: Bot, target: int, bot_db: dict) -> None:
     Порядок сообщений (по структуре шаблона), все уходят сразу подряд:
       1) «Ответ на /start» (start_msg) — текст;
       2) «Второе сообщение после /start» (second_msg) — любой контент
-         (напр. эмодзи); пропускается, если поле пустое;
-      3) отдельное сообщение с кнопкой запуска мини-аппа. Текст этого
-         сообщения — подпись кнопки (start_btn), т.к. сообщение в Telegram
-         не может быть пустым.
+         (напр. эмодзи), и кнопка запуска мини-аппа прикреплена прямо к
+         нему (отдельная строка-дубль с подписью кнопки не нужна).
+
+    Если второе сообщение пустое (поле очищено), кнопку вешаем на первое
+    сообщение, чтобы она не потерялась.
     """
     start_text = _template_text(
         bot_db, "start_msg", bot_db.get("welcome_message") or GREETING_TEXT
@@ -255,13 +256,11 @@ async def _send_start_flow(bot: Bot, target: int, bot_db: dict) -> None:
                 except Exception as e2:
                     logger.warning("send (no button) to %s failed: %s", target, e2)
 
-    # 1) и 2) — тексты сразу, без кнопки
-    await _send(start_text, None)
     if second_text:
-        await _send(second_text, None)
-    # 3) кнопка — отдельным сообщением (если её удалось построить)
-    if kb is not None:
-        await _send(label, kb)
+        await _send(start_text, None)   # 1) ответ на /start
+        await _send(second_text, kb)    # 2) второе сообщение + кнопка
+    else:
+        await _send(start_text, kb)
 
 
 async def _handle_access(message: Message, bot_db: dict) -> None:
