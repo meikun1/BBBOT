@@ -14,6 +14,7 @@ from handlers import (
     direct_link,
     folders,
     guard,
+    health,
     manage_bots,
     proxy,
     restart,
@@ -28,6 +29,7 @@ from handlers import (
 def setup_routers() -> Router:
     root = Router()
     root.include_router(start.router)
+    root.include_router(health.router)
     root.include_router(create_bot.router)
     root.include_router(manage_bots.router)
     root.include_router(restart.router)

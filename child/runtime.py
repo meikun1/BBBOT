@@ -12,17 +12,63 @@ import asyncio
 import logging
 
 from aiogram import Bot
+from aiogram.exceptions import TelegramUnauthorizedError
 
 from child.runner import build_dispatcher, make_bot
-from database import get_all_bots, get_bot, get_proxy
+from database import get_all_bots, get_bot, get_bot_by_tg_id, get_proxy
 
 logger = logging.getLogger(__name__)
+
+# Как часто проверять, что дочерние боты живы (не забанены / токен не отозван).
+HEALTH_INTERVAL_SEC = 120
 
 
 class BotRuntime:
     def __init__(self) -> None:
         self._tasks: dict[int, asyncio.Task] = {}  # tg_id -> polling task
         self._bots: dict[int, Bot] = {}            # tg_id -> Bot
+        self._manager_bot: Bot | None = None       # для уведомлений владельцу
+        self._banned: set[int] = set()             # tg_id, по которым уже уведомили
+        self._health_task: asyncio.Task | None = None
+
+    def set_manager_bot(self, bot: Bot) -> None:
+        """Бот-менеджер, через который шлём владельцу уведомления."""
+        self._manager_bot = bot
+
+    async def _notify_owner(self, owner_id: int | None, text: str) -> None:
+        if not (self._manager_bot and owner_id):
+            return
+        try:
+            await self._manager_bot.send_message(owner_id, text)
+        except Exception as e:
+            logger.warning("owner notify failed (%s): %s", owner_id, e)
+
+    async def send_test_ban(self, owner_id: int) -> bool:
+        """Отправить владельцу тестовое уведомление (проверка доставки)."""
+        await self._notify_owner(
+            owner_id,
+            "🔔 <b>Тест уведомления.</b> Так будет выглядеть сообщение, если "
+            "дочернего бота забанят или отзовут токен:\n\n"
+            "⚠️ Бот <b>@your_bot</b> недоступен — возможно, забанен Telegram "
+            "или токен отозван. Опрос остановлен.",
+        )
+        return self._manager_bot is not None
+
+    async def _on_banned(self, tg_id: int) -> None:
+        """Бот недоступен (401): уведомляем владельца и останавливаем опрос."""
+        if tg_id in self._banned:
+            return
+        self._banned.add(tg_id)
+        bot_db = get_bot_by_tg_id(tg_id)
+        await self.stop_bot(tg_id)
+        if bot_db:
+            uname = bot_db.get("username") or f"id={tg_id}"
+            await self._notify_owner(
+                bot_db.get("owner_id"),
+                f"⚠️ Бот <b>{uname}</b> недоступен — возможно, забанен Telegram "
+                "или токен отозван. Опрос остановлен.",
+            )
+        logger.warning("child bot %s unauthorized — stopped & owner notified", tg_id)
 
     async def start_all(self) -> None:
         """Поднять polling для всех включённых ботов при старте менеджера."""
@@ -43,6 +89,20 @@ class BotRuntime:
         bot = make_bot(token, proxy_url)
         try:
             me = await bot.get_me()
+        except TelegramUnauthorizedError:
+            # токен невалиден/отозван/бан — уведомляем владельца
+            await bot.session.close()
+            tg = bot_db.get("tg_id")
+            if tg and tg not in self._banned:
+                self._banned.add(tg)
+                uname = bot_db.get("username") or f"id={tg}"
+                await self._notify_owner(
+                    bot_db.get("owner_id"),
+                    f"⚠️ Бот <b>{uname}</b> не запустился — токен недействителен "
+                    "(возможно, забанен или отозван).",
+                )
+            logger.warning("bot id=%s unauthorized at start", bot_db.get("id"))
+            return
         except Exception as e:
             logger.warning("can't start bot id=%s: %s", bot_db.get("id"), e)
             await bot.session.close()
@@ -50,9 +110,26 @@ class BotRuntime:
         tg_id = me.id
         # Уже запущен — перезапускаем чисто.
         await self.stop_bot(tg_id)
+        self._banned.discard(tg_id)  # снова живой — разрешаем будущие уведомления
         self._bots[tg_id] = bot
         self._tasks[tg_id] = asyncio.create_task(self._poll(bot))
         logger.info("started child bot @%s (id=%s)", me.username, tg_id)
+
+    def start_health(self) -> None:
+        """Запустить фоновую проверку здоровья ботов (один раз)."""
+        if self._health_task is None or self._health_task.done():
+            self._health_task = asyncio.create_task(self._health_loop())
+
+    async def _health_loop(self) -> None:
+        while True:
+            await asyncio.sleep(HEALTH_INTERVAL_SEC)
+            for tg_id, bot in list(self._bots.items()):
+                try:
+                    await bot.get_me()
+                except TelegramUnauthorizedError:
+                    await self._on_banned(tg_id)
+                except Exception:
+                    pass  # сетевые/временные — не считаем баном
 
     async def _poll(self, bot: Bot) -> None:
         # Отдельный диспетчер на каждого бота — их можно поллить параллельно.

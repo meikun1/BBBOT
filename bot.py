@@ -63,7 +63,9 @@ async def main() -> None:
     dp.include_router(setup_routers())
 
     runtime = get_runtime()
+    runtime.set_manager_bot(bot)
     await runtime.start_all()
+    runtime.start_health()  # фоновый мониторинг банов дочерних ботов
 
     tasks = [asyncio.create_task(dp.start_polling(bot, handle_signals=False))]
     if RUN_WEB:
