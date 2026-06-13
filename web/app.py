@@ -23,25 +23,39 @@ from fastapi.responses import HTMLResponse
 
 from database import get_bot_by_tg_id, get_template, init_db
 from directlink_service import get_module
+from miniapp_template import ALL_DEFAULTS
 
 _MINIAPP_HTML = (Path(__file__).parent / "miniapp.html").read_text(encoding="utf-8")
 
 
 def _miniapp_config(bot_id: int) -> dict:
-    """Оформление мини-аппа из выбранного шаблона бота (для страницы)."""
-    cfg = {"color": "", "bg": "", "blur": 0, "main": "", "success": ""}
+    """Оформление и контент главной страницы мини-аппа из шаблона бота.
+
+    Берём поля главной страницы (эмодзи/текст/кнопка) с подстановкой
+    дефолтов «Стандартного шаблона», чтобы мини-апп показывал реальный
+    контент, а не заглушку, даже если поле в шаблоне не заполняли.
+    """
+    cfg = {"color": "", "bg": "", "blur": 0, "emoji": "", "text": "", "button": ""}
+    content: dict = {}
     bot = get_bot_by_tg_id(bot_id)
     if bot and bot.get("template_id"):
         t = get_template(bot["template_id"])
         if t:
-            c = t["content"]
-            cfg["color"] = c.get("ui_color") or ""
-            cfg["bg"] = c.get("bg") or ""
-            cfg["blur"] = int(c.get("blur") or 0)
-            # под-поля страниц (main_text/success_text), с откатом на старый
-            # одиночный ключ страницы (page_main/page_success) для совместимости
-            cfg["main"] = c.get("main_text") or c.get("page_main") or ""
-            cfg["success"] = c.get("success_text") or c.get("page_success") or ""
+            content = t["content"]
+
+    def _val(key: str) -> str:
+        v = content.get(key)
+        if v is not None and str(v).strip():
+            return v
+        return ALL_DEFAULTS.get(key, "")
+
+    color = content.get("ui_color") or ""
+    cfg["color"] = "" if color in ("", "default") else color
+    cfg["bg"] = content.get("bg") or ""
+    cfg["blur"] = int(content.get("blur") or 0)
+    cfg["emoji"] = _val("main_emoji")
+    cfg["text"] = _val("main_text")
+    cfg["button"] = _val("main_button")
     return cfg
 
 
