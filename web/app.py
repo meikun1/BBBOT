@@ -43,13 +43,17 @@ def _miniapp_config(bot_id: int) -> dict:
     шаблона». Мини-апп проигрывает их по кнопкам — для проверки рендера и
     параметров; бекенд-логика (проверка кода/2FA) подключается отдельно.
     """
-    cfg: dict = {"color": "", "bg": "", "blur": 0, "view": DEFAULT_VIEW, "pages": []}
+    cfg: dict = {
+        "color": "", "bg": "", "blur": 0, "view": DEFAULT_VIEW, "title": "", "pages": []
+    }
     content: dict = {}
     bot = get_bot_by_tg_id(bot_id)
     if bot and bot.get("template_id"):
         t = get_template(bot["template_id"])
         if t:
             content = t["content"]
+            # название приложения под шаблон (иначе — имя шаблона)
+            cfg["title"] = (content.get("app_name") or t.get("name") or "").strip()
 
     def _val(key: str) -> str:
         v = content.get(key)

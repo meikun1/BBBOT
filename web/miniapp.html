@@ -23,6 +23,13 @@
       position: fixed; inset: 0; z-index: 0;   /* НЕ -1: иначе фон body перекрывает */
       background-size: cover; background-position: center;
     }
+    #apphead {
+      position: fixed; top: 0; left: 0; right: 0; z-index: 2;
+      text-align: center; pointer-events: none;
+      padding: calc(10px + env(safe-area-inset-top)) 14px 10px;
+      font-size: 14px; font-weight: 600; letter-spacing: .2px; opacity: .85;
+      text-shadow: 0 1px 4px rgba(0,0,0,.5);
+    }
     #root {
       position: relative; z-index: 1;           /* контент над слоем фона */
       min-height: 100vh;            /* фолбэк для старых вебвью */
@@ -122,6 +129,7 @@
 </head>
 <body>
   <div id="bg"></div>
+  <div id="apphead"></div>
   <div id="root"></div>
 
   <script>
@@ -166,6 +174,12 @@
     function applyTheme() {
       // вид (вёрстка) — класс на корне
       root.className = "view-" + (CFG.view || "classic");
+      // название приложения под шаблон — в шапке мини-аппа и в title
+      if (CFG.title) {
+        document.title = CFG.title;
+        var ah = document.getElementById("apphead");
+        if (ah) ah.textContent = CFG.title;
+      }
       if (CFG.color) {
         document.documentElement.style.setProperty(
           "--tg-theme-button-color", CFG.color

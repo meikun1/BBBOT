@@ -170,13 +170,14 @@ _EDITABLE: dict[str, str] = {
     **_BUTTON_FIELDS,
     **{key: meta[2] for key, meta in _PAGE_SUBFIELDS.items()},
     "bg": "Фон (URL картинки)",
+    "app_name": "Название приложения",
     "name": "Название",
 }
 
 
 def _is_button_like(field: str) -> bool:
     """Поле редактируется как короткая подпись/эмодзи (без HTML-разметки)."""
-    if field in _BUTTON_FIELDS:
+    if field in _BUTTON_FIELDS or field == "app_name":
         return True
     meta = _PAGE_SUBFIELDS.get(field)
     return bool(meta and meta[1] in SHORT_SUBFIELDS)
@@ -214,6 +215,12 @@ def _std_kb(bid: int, tid: int) -> InlineKeyboardMarkup:
         InlineKeyboardButton(
             text="🏷 Название", callback_data=f"std_act:{bid}:{tid}:name"
         ),
+    )
+    b.row(
+        InlineKeyboardButton(
+            text="📲 Название приложения",
+            callback_data=f"std_act:{bid}:{tid}:app_name",
+        )
     )
     b.row(
         InlineKeyboardButton(
@@ -615,7 +622,7 @@ def _field_kb(bid: int, tid: int, field: str, has_value: bool) -> InlineKeyboard
 def _field_text(field: str, template: dict) -> str:
     label = _EDITABLE[field]
     value = _field_value(field, template).strip()
-    if field == "name":
+    if field in ("name", "app_name"):
         kind = "Название"
     elif _is_button_like(field):
         kind = "Значение"
