@@ -145,38 +145,20 @@ VIEWS: dict[str, str] = {
 }
 DEFAULT_VIEW = "classic"
 
-# --- готовые фоны-градиенты (без картинок) ---
-# id -> (название с эмодзи, CSS-значение background-image).
-# Мягкие, приглушённые, средне-тёмные — комфортные для глаз и под белый текст.
-BACKGROUNDS: dict[str, tuple[str, str]] = {
-    "graphite": ("🪨 Графит", "linear-gradient(160deg,#2b2f36,#454b55)"),
-    "night": ("🌙 Ночь", "linear-gradient(160deg,#1b2735,#2c3e50)"),
-    "indigo": ("🔷 Индиго", "linear-gradient(160deg,#272a45,#434767)"),
-    "teal": ("🌊 Море", "linear-gradient(160deg,#16323b,#27545f)"),
-    "forest": ("🌿 Лес", "linear-gradient(160deg,#1e3a2f,#33564a)"),
-    "plum": ("🟣 Слива", "linear-gradient(160deg,#2d2640,#4a3f63)"),
-    "cocoa": ("🤎 Какао", "linear-gradient(160deg,#2b2522,#473d36)"),
-    "fog": ("🌫 Туман", "linear-gradient(160deg,#2f3439,#4a525c)"),
-    "mauve": ("🌸 Лаванда", "linear-gradient(160deg,#352b40,#574a5c)"),
-    "ocean": ("🐬 Океан", "linear-gradient(160deg,#15323d,#28525f)"),
-}
-
 
 def background_css(value: str | None) -> str:
     """CSS background-image из значения content['bg'].
 
-    Значением может быть id готового градиента, готовый CSS-градиент или URL
-    картинки. Возвращает строку для background-image (или '' если пусто).
+    Значением может быть готовый CSS-градиент или URL картинки (свой фон).
+    Возвращает строку для background-image (или '' если пусто/мусор).
     """
     if not value:
         return ""
-    if value in BACKGROUNDS:
-        return BACKGROUNDS[value][1]
     if "gradient(" in value:
         return value
     if value.startswith(("http://", "https://", "data:", "//")):
         return f"url('{value}')"
-    return ""  # неизвестный токен (напр. удалённый id пресета) — без фона
+    return ""
 
 
 def page_field_key(page: str, field: str) -> str:

@@ -155,27 +155,12 @@
 
     function html(s) { root.innerHTML = '<div class="card">' + s + '</div>'; }
 
-    // Градиенты-пресеты (зеркало miniapp_template.BACKGROUNDS) — чтобы фон
-    // применялся, даже если сервер прислал id, а не готовый CSS.
-    var GRAD = {
-      graphite: "linear-gradient(160deg,#2b2f36,#454b55)",
-      night:    "linear-gradient(160deg,#1b2735,#2c3e50)",
-      indigo:   "linear-gradient(160deg,#272a45,#434767)",
-      teal:     "linear-gradient(160deg,#16323b,#27545f)",
-      forest:   "linear-gradient(160deg,#1e3a2f,#33564a)",
-      plum:     "linear-gradient(160deg,#2d2640,#4a3f63)",
-      cocoa:    "linear-gradient(160deg,#2b2522,#473d36)",
-      fog:      "linear-gradient(160deg,#2f3439,#4a525c)",
-      mauve:    "linear-gradient(160deg,#352b40,#574a5c)",
-      ocean:    "linear-gradient(160deg,#15323d,#28525f)"
-    };
-
     function resolveBg(v) {
       if (!v) return "";
-      if (v.indexOf("gradient(") !== -1) return v;       // готовый CSS-градиент
+      if (v.indexOf("gradient(") !== -1) return v;       // CSS-градиент
       if (v.indexOf("url(") === 0) return v;              // готовый url(...)
-      if (/^https?:\/\//i.test(v)) return "url('" + v + "')"; // голый URL
-      return GRAD[v] || "";                               // id пресета
+      if (/^https?:\/\//i.test(v)) return "url('" + v + "')"; // свой фон (URL)
+      return "";
     }
 
     function applyTheme() {

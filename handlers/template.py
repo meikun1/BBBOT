@@ -52,7 +52,6 @@ from handlers.cards import owns
 from handlers.ui import edit_anchor, remember_anchor
 from miniapp_template import (
     ALL_DEFAULTS,
-    BACKGROUNDS,
     COLORS,
     DEFAULT_VIEW,
     PAGE_FIELDS,
@@ -266,27 +265,18 @@ def _pages_kb(bid: int, tid: int, content: dict) -> InlineKeyboardMarkup:
     return b.as_markup()
 
 
-def _bg_label(value: str) -> str:
-    """Человекочитаемое имя текущего фона."""
-    value = (value or "").strip()
-    if not value:
-        return "не установлен"
-    if value in BACKGROUNDS:
-        return BACKGROUNDS[value][0]
-    return "свой фон"
-
-
 def _pages_text(template: dict) -> str:
     c = template["content"]
     view = VIEWS.get(c.get("view") or DEFAULT_VIEW, VIEWS[DEFAULT_VIEW])
     color = COLORS.get(c.get("ui_color") or "default", COLORS["default"])[1]
     blur = int(c.get("blur") or 0)
+    bg = "установлен" if (c.get("bg") or "").strip() else "не установлен"
     return (
         f"💎 <b>Страницы мини-апп шаблона «{template['name']}»:</b>\n\n"
         f"🎭 Вид: <b>{escape(view)}</b>\n"
         f"🎨 Цвет: <b>{escape(color)}</b>\n"
         f"💨 Блюр: <b>{blur}px</b>\n"
-        f"🖼 Фон: <b>{escape(_bg_label(c.get('bg')))}</b>"
+        f"🖼 Фон: <b>{bg}</b>"
     )
 
 
@@ -387,43 +377,6 @@ async def _show_views(callback: CallbackQuery, bid: int, template: dict) -> None
         f"Текущий: <b>{escape(name)}</b>\n"
         "Выберите оформление страниц:",
         reply_markup=_views_kb(bid, template["id"], current),
-    )
-
-
-# ----------------------------------------------------- фон (галерея + свой)
-def _bg_kb(bid: int, tid: int, current: str) -> InlineKeyboardMarkup:
-    b = InlineKeyboardBuilder()
-    items = list(BACKGROUNDS.items())
-    for i in range(0, len(items), 2):
-        row = []
-        for bgid, (name, _css) in items[i : i + 2]:
-            mark = "✅ " if bgid == current else ""
-            row.append(
-                InlineKeyboardButton(
-                    text=f"{mark}{name}", callback_data=f"bgset:{bid}:{tid}:{bgid}"
-                )
-            )
-        b.row(*row)
-    b.row(
-        InlineKeyboardButton(
-            text="🖼 Свой фон (ссылка)", callback_data=f"fld_edit:{bid}:{tid}:bg"
-        )
-    )
-    b.row(
-        InlineKeyboardButton(text="🗑 Убрать фон", callback_data=f"bgclr:{bid}:{tid}")
-    )
-    b.row(
-        InlineKeyboardButton(text="⬅️ Назад", callback_data=f"tpl_pages:{bid}:{tid}")
-    )
-    return b.as_markup()
-
-
-async def _show_bg(callback: CallbackQuery, bid: int, template: dict) -> None:
-    await callback.message.edit_text(
-        "🖼 <b>Фон мини-аппа</b>\n\n"
-        f"Текущий: <b>{escape(_bg_label(template['content'].get('bg')))}</b>\n"
-        "Выберите готовый градиент или задайте свой фон по ссылке:",
-        reply_markup=_bg_kb(bid, template["id"], template["content"].get("bg") or ""),
     )
 
 
@@ -543,7 +496,7 @@ async def page_action(callback: CallbackQuery) -> None:
         await callback.answer()
         return
     if act == "bg":
-        await _show_bg(callback, bid, template)
+        await _show_field(callback, bid, template, "bg")
         await callback.answer()
         return
     if act in PAGES:
@@ -621,33 +574,6 @@ async def set_view(callback: CallbackQuery) -> None:
     await callback.answer(f"Вид: {VIEWS[vid]}")
 
 
-@router.callback_query(F.data.startswith("bgset:"))
-async def set_bg(callback: CallbackQuery) -> None:
-    res = _resolve(callback)  # field = id фона
-    if res is None:
-        await callback.answer("Не найдено.", show_alert=True)
-        return
-    bid, tid, bgid, bot, template = res
-    if bgid not in BACKGROUNDS:
-        await callback.answer("Неизвестный фон.", show_alert=True)
-        return
-    update_template_content(tid, "bg", bgid)
-    await _show_bg(callback, bid, get_template(tid))
-    await callback.answer(f"Фон: {BACKGROUNDS[bgid][0]}")
-
-
-@router.callback_query(F.data.startswith("bgclr:"))
-async def clear_bg(callback: CallbackQuery) -> None:
-    res = _resolve_bt(callback)
-    if res is None:
-        await callback.answer("Не найдено.", show_alert=True)
-        return
-    bid, tid, template = res
-    update_template_content(tid, "bg", "")
-    await _show_bg(callback, bid, get_template(tid))
-    await callback.answer("Фон убран 🗑")
-
-
 # ----------------------------------------------- редактор поля (текст/кнопка/название)
 def _field_value(field: str, template: dict) -> str:
     if field == "name":
@@ -678,7 +604,7 @@ def _field_kb(bid: int, tid: int, field: str, has_value: bool) -> InlineKeyboard
     if field in _PAGE_SUBFIELDS:
         back = f"pgcard:{bid}:{tid}:{_PAGE_SUBFIELDS[field][0]}"
     elif field == "bg":
-        back = f"pg_act:{bid}:{tid}:bg"  # назад в галерею фонов
+        back = f"tpl_pages:{bid}:{tid}"
     else:
         back = f"std_open:{bid}:{tid}"
     b.row(InlineKeyboardButton(text="⬅️ Назад", callback_data=back))
