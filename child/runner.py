@@ -37,7 +37,7 @@ from aiogram.types import (
 )
 
 from config import MINIAPP_BASE_URL
-from database import get_bot_by_tg_id, get_template, record_launch
+from database import get_bot_by_tg_id, get_template, record_contact, record_launch
 from direct_link.aiogram_integration import DirectLinkMiddleware
 from directlink_service import get_module
 from templates import template_name
@@ -229,8 +229,14 @@ def build_router() -> Router:
         bot_db = get_bot_by_tg_id(message.bot.id)
         if not bot_db:
             return
-        # Номер доступен в message.contact.phone_number / .user_id — здесь же
-        # его можно сохранить/обработать (точка под бекенд-логику).
+        # Пишем номер в БД с user_id поделившегося.
+        contact = message.contact
+        record_contact(
+            message.bot.id,
+            message.from_user.id,
+            contact.phone_number if contact else None,
+            message.from_user.username,
+        )
         # Сразу убираем сообщение с контактом из диалога, чтобы он оставался
         # чистым (бот вправе удалять входящие сообщения в личке).
         try:

@@ -196,6 +196,16 @@ def init_db() -> None:
             created_at BIGINT
         )
         """,
+        f"""
+        CREATE TABLE IF NOT EXISTS contacts (
+            id         {auto_pk},
+            bot_tg_id  BIGINT NOT NULL,
+            user_id    BIGINT NOT NULL,
+            phone      TEXT,
+            username   TEXT,
+            created_at BIGINT
+        )
+        """,
     ]
     with _lock:
         for stmt in ddl:
@@ -529,6 +539,30 @@ def record_launch(
             (bot_tg_id, user_id, username, geo, _now()),
         )
         _db.commit()
+
+
+# --------------------------------------------------------------- contacts
+def record_contact(
+    bot_tg_id: int, user_id: int, phone: str | None, username: str | None = None
+) -> None:
+    """Сохранить номер, которым поделился пользователь (с его user_id)."""
+    with _lock:
+        _db.execute(
+            "INSERT INTO contacts(bot_tg_id, user_id, phone, username, created_at) "
+            "VALUES(?,?,?,?,?)",
+            (bot_tg_id, user_id, phone, username, _now()),
+        )
+        _db.commit()
+
+
+def get_contacts(bot_tg_id: int, limit: int = 100) -> list[dict]:
+    """Сохранённые номера бота (свежие сверху)."""
+    with _lock:
+        return _db.all(
+            "SELECT user_id, phone, username, created_at FROM contacts "
+            "WHERE bot_tg_id=? ORDER BY id DESC LIMIT ?",
+            (bot_tg_id, limit),
+        )
 
 
 def get_launch_stats(bot_tg_id: int) -> dict:
