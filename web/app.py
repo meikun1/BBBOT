@@ -86,7 +86,16 @@ def create_app() -> FastAPI:
         cfg_json = json.dumps(cfg, ensure_ascii=False).replace("<", "\\u003c")
         page = _MINIAPP_HTML.replace("__BOT_ID__", str(bot_id))
         page = page.replace("__CFG__", cfg_json)
-        return HTMLResponse(page)
+        # запрещаем кэширование: правки шаблона (вид/фон/тексты) должны быть
+        # видны сразу, без отдачи старой версии страницы из кэша вебвью/CDN
+        return HTMLResponse(
+            page,
+            headers={
+                "Cache-Control": "no-store, no-cache, must-revalidate, max-age=0",
+                "Pragma": "no-cache",
+                "Expires": "0",
+            },
+        )
 
     get_module().mount(app)
     return app
