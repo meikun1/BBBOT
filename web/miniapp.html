@@ -20,11 +20,11 @@
       overflow-x: hidden;
     }
     #bg {
-      position: fixed; inset: 0; z-index: -1;
+      position: fixed; inset: 0; z-index: 0;   /* НЕ -1: иначе фон body перекрывает */
       background-size: cover; background-position: center;
     }
     #root {
-      position: relative;
+      position: relative; z-index: 1;           /* контент над слоем фона */
       min-height: 100vh;            /* фолбэк для старых вебвью */
       min-height: 100dvh;           /* реальная высота экрана телефона */
       display: flex; flex-direction: column;
@@ -62,21 +62,22 @@
     /* ============ виды (скины вёрстки страниц) ============ */
     /* classic — центр, без панели (база) */
 
-    /* card — плотная тёмная карточка-панель с тенью */
+    /* card — ПЛОТНАЯ тёмная карточка: фон сквозь неё почти не виден */
     #root.view-card .card {
-      background: rgba(0,0,0,.40);
-      border: 1px solid rgba(255,255,255,.08);
-      border-radius: 28px; padding: 36px 24px;
-      box-shadow: 0 18px 55px rgba(0,0,0,.5);
+      background: rgba(15,17,23,.95);
+      border: 1px solid rgba(255,255,255,.06);
+      border-radius: 18px; padding: 38px 24px;
+      box-shadow: 0 22px 60px rgba(0,0,0,.6);
     }
-    /* glass — матовое стекло (полупрозрачно + размытие) */
+    /* glass — ПРОЗРАЧНОЕ матовое стекло: фон чётко просвечивает и размыт */
     #root.view-glass .card {
-      background: rgba(255,255,255,.13);
-      border: 1px solid rgba(255,255,255,.28);
-      border-radius: 28px; padding: 36px 24px;
-      -webkit-backdrop-filter: blur(20px) saturate(150%);
-      backdrop-filter: blur(20px) saturate(150%);
-      box-shadow: 0 18px 55px rgba(0,0,0,.35);
+      background: rgba(255,255,255,.08);
+      border: 1.5px solid rgba(255,255,255,.45);
+      border-radius: 34px; padding: 38px 24px;
+      -webkit-backdrop-filter: blur(24px) saturate(180%);
+      backdrop-filter: blur(24px) saturate(180%);
+      box-shadow: inset 0 1px 0 rgba(255,255,255,.25),
+                  0 22px 60px rgba(0,0,0,.3);
     }
     /* minimal — влево, сверху, крупный заголовок, контурная кнопка */
     #root.view-minimal { justify-content: flex-start; text-align: left; }
