@@ -56,6 +56,7 @@ from miniapp_template import (
     DEFAULT_VIEW,
     PAGE_FIELDS,
     PAGES,
+    PRESETS,
     SHORT_SUBFIELDS,
     VIEWS,
     default_content,
@@ -103,7 +104,7 @@ def _menu_kb(bot: dict, templates: list[dict]) -> InlineKeyboardMarkup:
     )
     b.row(
         InlineKeyboardButton(
-            text="💎 Шаблоны мини-апп", callback_data=f"tpl_soon:{bid}:miniapp"
+            text="💎 Шаблоны мини-апп", callback_data=f"tpl_gallery:{bid}"
         )
     )
     b.row(
@@ -805,6 +806,51 @@ async def create_template_save(message: Message, state: FSMContext) -> None:
     await edit_anchor(
         message, data, _std_text(template), _std_kb(bid, template["id"])
     )
+
+
+# --------------------------------------------------- готовые шаблоны мини-апп
+@router.callback_query(F.data.startswith("tpl_gallery:"))
+async def gallery(callback: CallbackQuery) -> None:
+    bid = int(callback.data.split(":")[1])
+    bot = get_bot(bid)
+    if not owns(callback.from_user.id, bot):
+        await callback.answer("Бот не найден.", show_alert=True)
+        return
+    b = InlineKeyboardBuilder()
+    for p in PRESETS:
+        b.row(
+            InlineKeyboardButton(
+                text=f"💎 {p['name']}", callback_data=f"tpl_use:{bid}:{p['id']}"
+            )
+        )
+    b.row(InlineKeyboardButton(text="⬅️ Назад", callback_data=f"template:{bid}"))
+    await callback.message.edit_text(
+        "💎 <b>Шаблоны мини-апп</b>\n\n"
+        "Готовые шаблоны со своими текстами. Выберите — добавится копия, "
+        "её можно дальше редактировать:",
+        reply_markup=b.as_markup(),
+    )
+    await callback.answer()
+
+
+@router.callback_query(F.data.startswith("tpl_use:"))
+async def use_preset(callback: CallbackQuery) -> None:
+    _, bid_s, pid = callback.data.split(":")
+    bid = int(bid_s)
+    bot = get_bot(bid)
+    if not owns(callback.from_user.id, bot):
+        await callback.answer("Бот не найден.", show_alert=True)
+        return
+    preset = next((p for p in PRESETS if p["id"] == pid), None)
+    if preset is None:
+        await callback.answer("Шаблон не найден.", show_alert=True)
+        return
+    tid = create_template(
+        callback.from_user.id, preset["name"], "standard", preset["content"]
+    )
+    set_bot_template(bid, tid)
+    await _show_editor(callback, bid, get_template(tid))
+    await callback.answer("Шаблон добавлен ✅")
 
 
 # --------------------------------------------------- добавить по коду

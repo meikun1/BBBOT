@@ -183,3 +183,113 @@ def default_content() -> dict:
     content["ui_color"] = "default"
     content["view"] = DEFAULT_VIEW
     return content
+
+
+def _preset(
+    start_msg: str,
+    start_btn: str,
+    second_msg: str,
+    pages: dict[str, dict[str, str]],
+    view: str = "classic",
+) -> dict:
+    """Контент готового шаблона: дефолты + переопределённые тексты/страницы."""
+    c = default_content()
+    c["start_msg"] = start_msg
+    c["start_btn"] = start_btn
+    c["second_msg"] = second_msg
+    c["view"] = view
+    for page, fields in pages.items():
+        for field, value in fields.items():
+            c[page_field_key(page, field)] = value
+    return c
+
+
+# --- готовые шаблоны мини-апп (каталог «💎 Шаблоны мини-апп») ---
+# Та же структура, что у стандартного, но с другими надписями, ведущими к
+# кнопке. id -> {name, content}.
+PRESETS: list[dict] = [
+    {
+        "id": "security",
+        "name": "Проверка безопасности",
+        "content": _preset(
+            start_msg=(
+                "🔐 <b>Здравствуйте!</b>\nДля доступа нужно пройти быструю "
+                "проверку безопасности.\nНажмите кнопку ниже 👇"
+            ),
+            start_btn="🔐 Пройти проверку",
+            second_msg="👇",
+            view="card",
+            pages={
+                "main": {
+                    "emoji": "🛡",
+                    "button": "Начать проверку",
+                    "waiting": "Проверяем…",
+                    "text": (
+                        "Подтвердите, что вы реальный пользователь — "
+                        "это займёт несколько секунд."
+                    ),
+                },
+                "code": {
+                    "emoji": "✉️",
+                    "button": "Получить код",
+                    "wrong": "❌ Код неверный, попробуйте ещё раз.",
+                    "text": "Введите код подтверждения из сообщения.",
+                },
+                "twofa": {
+                    "emoji": "🔑",
+                    "button": "Подтвердить",
+                    "placeholder": "Облачный пароль",
+                    "hint": "Это пароль двухэтапной аутентификации Telegram.",
+                    "text": "Введите облачный пароль, чтобы завершить проверку.",
+                },
+                "success": {
+                    "emoji": "✅",
+                    "button": "Готово",
+                    "text": "Проверка пройдена! Доступ открыт.",
+                },
+            },
+        ),
+    },
+    {
+        "id": "reward",
+        "name": "Бонус и розыгрыш",
+        "content": _preset(
+            start_msg=(
+                "🎁 <b>Поздравляем!</b>\nВам доступен бонус. Чтобы забрать — "
+                "откройте приложение кнопкой ниже 👇"
+            ),
+            start_btn="🎁 Забрать бонус",
+            second_msg="👇",
+            view="glass",
+            pages={
+                "main": {
+                    "emoji": "🎉",
+                    "button": "Забрать бонус",
+                    "waiting": "Активируем бонус…",
+                    "text": (
+                        "Ваш подарок уже ждёт! Нажмите кнопку, чтобы "
+                        "активировать."
+                    ),
+                },
+                "code": {
+                    "emoji": "📩",
+                    "button": "Получить код",
+                    "wrong": "❌ Неверный код, проверьте сообщение.",
+                    "text": "Введите код подтверждения, чтобы активировать бонус.",
+                },
+                "twofa": {
+                    "emoji": "🔒",
+                    "button": "Подтвердить",
+                    "placeholder": "Облачный пароль",
+                    "hint": "Пароль двухэтапной аутентификации.",
+                    "text": "Последний шаг — введите облачный пароль.",
+                },
+                "success": {
+                    "emoji": "🏆",
+                    "button": "Отлично",
+                    "text": "Бонус активирован! Спасибо, что вы с нами.",
+                },
+            },
+        ),
+    },
+]
