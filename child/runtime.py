@@ -15,12 +15,31 @@ from aiogram import Bot
 from aiogram.exceptions import TelegramUnauthorizedError
 
 from child.runner import build_dispatcher, make_bot
-from database import get_all_bots, get_bot, get_bot_by_tg_id, get_proxy
+from config import BAN_CHECK_INTERVAL
+from database import (
+    get_all_bots,
+    get_bot,
+    get_bot_by_tg_id,
+    get_launch_stats,
+    get_proxy,
+)
 
 logger = logging.getLogger(__name__)
 
-# Как часто проверять, что дочерние боты живы (не забанены / токен не отозван).
-HEALTH_INTERVAL_SEC = 120
+
+def _ban_text(bot_db: dict) -> str:
+    """Текст уведомления о бане/удалении бота (с числом запусков)."""
+    uname = bot_db.get("username") or f"id={bot_db.get('tg_id')}"
+    total = 0
+    if bot_db.get("tg_id"):
+        try:
+            total = get_launch_stats(bot_db["tg_id"]).get("total", 0)
+        except Exception:
+            total = 0
+    return (
+        f"🚫 Ваш бот <b>{uname}</b> был удалён или забанен\n\n"
+        f"👀 Запусков: <b>{total}</b>"
+    )
 
 
 class BotRuntime:
@@ -47,10 +66,9 @@ class BotRuntime:
         """Отправить владельцу тестовое уведомление (проверка доставки)."""
         await self._notify_owner(
             owner_id,
-            "🔔 <b>Тест уведомления.</b> Так будет выглядеть сообщение, если "
-            "дочернего бота забанят или отзовут токен:\n\n"
-            "⚠️ Бот <b>@your_bot</b> недоступен — возможно, забанен Telegram "
-            "или токен отозван. Опрос остановлен.",
+            "🔔 <b>Тест уведомления</b> — так придёт сообщение при бане/удалении:\n\n"
+            "🚫 Ваш бот <b>@your_bot</b> был удалён или забанен\n\n"
+            "👀 Запусков: <b>0</b>",
         )
         return self._manager_bot is not None
 
@@ -62,12 +80,7 @@ class BotRuntime:
         bot_db = get_bot_by_tg_id(tg_id)
         await self.stop_bot(tg_id)
         if bot_db:
-            uname = bot_db.get("username") or f"id={tg_id}"
-            await self._notify_owner(
-                bot_db.get("owner_id"),
-                f"⚠️ Бот <b>{uname}</b> недоступен — возможно, забанен Telegram "
-                "или токен отозван. Опрос остановлен.",
-            )
+            await self._notify_owner(bot_db.get("owner_id"), _ban_text(bot_db))
         logger.warning("child bot %s unauthorized — stopped & owner notified", tg_id)
 
     async def start_all(self) -> None:
@@ -95,12 +108,7 @@ class BotRuntime:
             tg = bot_db.get("tg_id")
             if tg and tg not in self._banned:
                 self._banned.add(tg)
-                uname = bot_db.get("username") or f"id={tg}"
-                await self._notify_owner(
-                    bot_db.get("owner_id"),
-                    f"⚠️ Бот <b>{uname}</b> не запустился — токен недействителен "
-                    "(возможно, забанен или отозван).",
-                )
+                await self._notify_owner(bot_db.get("owner_id"), _ban_text(bot_db))
             logger.warning("bot id=%s unauthorized at start", bot_db.get("id"))
             return
         except Exception as e:
@@ -122,7 +130,7 @@ class BotRuntime:
 
     async def _health_loop(self) -> None:
         while True:
-            await asyncio.sleep(HEALTH_INTERVAL_SEC)
+            await asyncio.sleep(BAN_CHECK_INTERVAL)
             for tg_id, bot in list(self._bots.items()):
                 try:
                     await bot.get_me()

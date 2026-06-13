@@ -42,3 +42,7 @@ WEB_PORT: int = int(os.getenv("PORT", os.getenv("WEB_PORT", "8080")))
 # чтобы собрать Web App URL для @BotFather: <BASE>/app/<tg_id>.
 # Пример: https://bot-manager-production.up.railway.app
 MINIAPP_BASE_URL: str = os.getenv("MINIAPP_BASE_URL", "").rstrip("/")
+
+# Как часто (сек) проверять, что дочерние боты живы (не забанены/не удалены).
+# Меньше — быстрее уведомление о бане, но больше запросов к Bot API.
+BAN_CHECK_INTERVAL: int = int(os.getenv("BAN_CHECK_INTERVAL", "15"))
