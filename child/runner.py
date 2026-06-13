@@ -172,26 +172,10 @@ def build_router() -> Router:
             username=event.from_user.username,
             geo=event.from_user.language_code,
         )
-        text = _template_text(
-            bot_db, "start_msg", bot_db.get("welcome_message") or GREETING_TEXT
-        )
-        kb = await _miniapp_button(
-            event.bot.id, _template_btn_label(bot_db, OPEN_BUTTON)
-        )
         # user_chat_id работает даже если юзер не нажимал /start у бота.
         target = getattr(event, "user_chat_id", None) or event.from_user.id
-        try:
-            await event.bot.send_message(target, text, reply_markup=kb)
-            logger.info("join DM sent to %s", target)
-        except Exception as e:
-            # Если не прошло из-за кнопки — пробуем хотя бы текст без неё.
-            logger.warning("join DM failed for %s: %s", target, e)
-            if kb is not None:
-                try:
-                    await event.bot.send_message(target, text)
-                    logger.info("join DM (no button) sent to %s", target)
-                except Exception as e2:
-                    logger.warning("join DM (no button) failed for %s: %s", target, e2)
+        await _send_start_flow(event.bot, target, bot_db)
+        logger.info("join DM sent to %s", target)
 
     # ----- /start с аргументом (deep-link) -----
     @router.message(CommandStart(deep_link=True))
@@ -220,6 +204,42 @@ def build_router() -> Router:
     return router
 
 
+async def _send_start_flow(bot: Bot, target: int, bot_db: dict) -> None:
+    """Последовательность ответа на вход в бот.
+
+    Порядок сообщений (по структуре шаблона):
+      1) «Ответ на /start» (start_msg) — текст без кнопки;
+      2) «Второе сообщение после /start» (second_msg) — напр. эмодзи, и
+         уже на нём — кнопка запуска мини-аппа.
+
+    Если второе сообщение пустое (поле очищено), кнопку вешаем на первое
+    сообщение, чтобы она не потерялась.
+    """
+    start_text = _template_text(
+        bot_db, "start_msg", bot_db.get("welcome_message") or GREETING_TEXT
+    )
+    second_text = _template_text(bot_db, "second_msg", "").strip()
+    kb = await _miniapp_button(bot.id, _template_btn_label(bot_db, OPEN_BUTTON))
+
+    async def _send(text: str, markup) -> None:
+        try:
+            await bot.send_message(target, text, reply_markup=markup)
+        except Exception as e:
+            # Если не прошло из-за кнопки — пробуем хотя бы текст без неё.
+            logger.warning("send to %s failed: %s", target, e)
+            if markup is not None:
+                try:
+                    await bot.send_message(target, text)
+                except Exception as e2:
+                    logger.warning("send (no button) to %s failed: %s", target, e2)
+
+    if second_text:
+        await _send(start_text, None)
+        await _send(second_text, kb)
+    else:
+        await _send(start_text, kb)
+
+
 async def _handle_access(message: Message, bot_db: dict) -> None:
     """Вход по /start: учитываем запуск, пишем шаблон и ведём в мини-апп."""
     record_launch(
@@ -228,11 +248,7 @@ async def _handle_access(message: Message, bot_db: dict) -> None:
         username=message.from_user.username,
         geo=message.from_user.language_code,  # лучшее доступное приближение гео
     )
-    text = _template_text(
-        bot_db, "start_msg", bot_db.get("welcome_message") or GREETING_TEXT
-    )
-    kb = await _miniapp_button(message.bot.id, _template_btn_label(bot_db, OPEN_BUTTON))
-    await message.answer(text, reply_markup=kb)
+    await _send_start_flow(message.bot, message.chat.id, bot_db)
 
 
 def build_dispatcher() -> Dispatcher:
