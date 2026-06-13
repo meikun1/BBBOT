@@ -155,7 +155,27 @@
       var tg = tgApp();
       if (tg) { try { tg.expand(); } catch (e) {} }
       var act = document.getElementById("act");
-      if (act) act.onclick = nextStep;
+      if (act) {
+        // На главной странице («подтвердите, что вы человек») кнопка сначала
+        // просит поделиться номером телефона, и только после согласия ведёт
+        // дальше. Бот получит контакт серверно (под бекенд-логику).
+        act.onclick = (p.key === "main") ? requestPhone : nextStep;
+      }
+    }
+
+    function requestPhone() {
+      var tg = tgApp();
+      if (tg && typeof tg.requestContact === "function") {
+        try {
+          tg.requestContact(function (ok, evt) {
+            var shared = ok === true || (evt && evt.status === "sent");
+            if (shared) nextStep();           // согласился — идём дальше
+          });
+          return;
+        } catch (e) {}
+      }
+      // старый Telegram / вне Telegram — просто переходим (для теста вёрстки)
+      nextStep();
     }
 
     function nextStep() {
