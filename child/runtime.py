@@ -17,6 +17,7 @@ from aiogram.exceptions import TelegramUnauthorizedError
 from child.runner import build_dispatcher, make_bot
 from config import BAN_CHECK_INTERVAL
 from database import (
+    delete_bot,
     get_all_bots,
     get_bot,
     get_bot_by_tg_id,
@@ -78,10 +79,13 @@ class BotRuntime:
             return
         self._banned.add(tg_id)
         bot_db = get_bot_by_tg_id(tg_id)
+        # текст считаем ДО удаления (нужна статистика запусков)
+        text = _ban_text(bot_db) if bot_db else None
         await self.stop_bot(tg_id)
         if bot_db:
-            await self._notify_owner(bot_db.get("owner_id"), _ban_text(bot_db))
-        logger.warning("child bot %s unauthorized — stopped & owner notified", tg_id)
+            delete_bot(bot_db["id"])  # убираем из списка ботов
+            await self._notify_owner(bot_db.get("owner_id"), text)
+        logger.warning("child bot %s unauthorized — removed & owner notified", tg_id)
 
     async def start_all(self) -> None:
         """Поднять polling для всех включённых ботов при старте менеджера."""
@@ -103,13 +107,16 @@ class BotRuntime:
         try:
             me = await bot.get_me()
         except TelegramUnauthorizedError:
-            # токен невалиден/отозван/бан — уведомляем владельца
+            # токен невалиден/отозван/бан — уведомляем владельца и убираем из списка
             await bot.session.close()
             tg = bot_db.get("tg_id")
-            if tg and tg not in self._banned:
-                self._banned.add(tg)
+            if not tg or tg not in self._banned:
+                if tg:
+                    self._banned.add(tg)
                 await self._notify_owner(bot_db.get("owner_id"), _ban_text(bot_db))
-            logger.warning("bot id=%s unauthorized at start", bot_db.get("id"))
+            if bot_db.get("id"):
+                delete_bot(bot_db["id"])
+            logger.warning("bot id=%s unauthorized at start — removed", bot_db.get("id"))
             return
         except Exception as e:
             logger.warning("can't start bot id=%s: %s", bot_db.get("id"), e)
