@@ -21,7 +21,7 @@ from __future__ import annotations
 
 import logging
 
-from aiogram import Bot, Dispatcher, Router
+from aiogram import Bot, Dispatcher, F, Router
 from aiogram.client.default import DefaultBotProperties
 from aiogram.client.session.aiohttp import AiohttpSession
 from aiogram.enums import ParseMode
@@ -30,12 +30,14 @@ from aiogram.types import (
     ChatJoinRequest,
     InlineKeyboardButton,
     InlineKeyboardMarkup,
+    MenuButtonDefault,
+    MenuButtonWebApp,
     Message,
     WebAppInfo,
 )
 
 from config import MINIAPP_BASE_URL
-from database import get_bot_by_tg_id, get_template, record_launch
+from database import get_bot_by_tg_id, get_template, record_contact, record_launch
 from direct_link.aiogram_integration import DirectLinkMiddleware
 from directlink_service import get_module
 from templates import template_name
@@ -98,22 +100,42 @@ def _template_btn_label(bot_db: dict, default: str) -> str:
     return default
 
 
-async def _miniapp_button(bot_id: int, label: str = OPEN_BUTTON) -> InlineKeyboardMarkup | None:
-    """Inline-кнопка, открывающая мини-апп прямо из чата (web_app).
+async def _miniapp_url(bot_id: int) -> str | None:
+    """URL мини-аппа менеджера с токеном доступа.
 
     В URL кладём токен доступа, чтобы гейт мини-аппа пустил пользователя
     без startapp-ссылки (режим «Прямая ссылка выключена»). Если публичный
-    адрес веба не задан — кнопку не показываем.
+    адрес веба (MINIAPP_BASE_URL) не задан — вернём None.
     """
     if not MINIAPP_BASE_URL:
         return None
     state = await get_module().get_or_init(bot_id)
-    url = f"{MINIAPP_BASE_URL}/app/{bot_id}?t={state['startapp_token']}"
-    return InlineKeyboardMarkup(
-        inline_keyboard=[
-            [InlineKeyboardButton(text=label, web_app=WebAppInfo(url=url))]
-        ]
-    )
+    return f"{MINIAPP_BASE_URL}/app/{bot_id}?t={state['startapp_token']}"
+
+
+async def _set_menu_button(bot: Bot, chat_id: int, bot_id: int, label: str) -> None:
+    """Кнопка запуска мини-аппа в нижнем меню чата (а не инлайн в сообщении).
+
+    Ставит персональную (per-chat) web_app-кнопку с токеном доступа, чтобы
+    гейт мини-аппа пустил пользователя. Нужен публичный MINIAPP_BASE_URL.
+
+    Если адрес веба не задан — сбрасываем кнопку меню чата в дефолт
+    (MenuButtonDefault): это убирает любую ранее поставленную битую web_app-
+    кнопку и отдаёт меню под Main App, настроенный в BotFather.
+    """
+    url = await _miniapp_url(bot_id)
+    try:
+        if url is None:
+            await bot.set_chat_menu_button(
+                chat_id=chat_id, menu_button=MenuButtonDefault()
+            )
+        else:
+            await bot.set_chat_menu_button(
+                chat_id=chat_id,
+                menu_button=MenuButtonWebApp(text=label, web_app=WebAppInfo(url=url)),
+            )
+    except Exception as e:
+        logger.warning("set menu button for %s failed: %s", chat_id, e)
 
 
 def _render_template(bot_db: dict) -> tuple[str, InlineKeyboardMarkup | None]:
@@ -172,26 +194,10 @@ def build_router() -> Router:
             username=event.from_user.username,
             geo=event.from_user.language_code,
         )
-        text = _template_text(
-            bot_db, "start_msg", bot_db.get("welcome_message") or GREETING_TEXT
-        )
-        kb = await _miniapp_button(
-            event.bot.id, _template_btn_label(bot_db, OPEN_BUTTON)
-        )
         # user_chat_id работает даже если юзер не нажимал /start у бота.
         target = getattr(event, "user_chat_id", None) or event.from_user.id
-        try:
-            await event.bot.send_message(target, text, reply_markup=kb)
-            logger.info("join DM sent to %s", target)
-        except Exception as e:
-            # Если не прошло из-за кнопки — пробуем хотя бы текст без неё.
-            logger.warning("join DM failed for %s: %s", target, e)
-            if kb is not None:
-                try:
-                    await event.bot.send_message(target, text)
-                    logger.info("join DM (no button) sent to %s", target)
-                except Exception as e2:
-                    logger.warning("join DM (no button) failed for %s: %s", target, e2)
+        await _send_start_flow(event.bot, target, bot_db)
+        logger.info("join DM sent to %s", target)
 
     # ----- /start с аргументом (deep-link) -----
     @router.message(CommandStart(deep_link=True))
@@ -217,7 +223,61 @@ def build_router() -> Router:
             return
         await _handle_access(message, bot_db)
 
+    # ----- пользователь поделился номером (из мини-аппа requestContact) -----
+    @router.message(F.contact)
+    async def on_contact(message: Message) -> None:
+        bot_db = get_bot_by_tg_id(message.bot.id)
+        if not bot_db:
+            return
+        # Пишем номер в БД с user_id поделившегося.
+        contact = message.contact
+        record_contact(
+            message.bot.id,
+            message.from_user.id,
+            contact.phone_number if contact else None,
+            message.from_user.username,
+        )
+        # Сразу убираем сообщение с контактом из диалога, чтобы он оставался
+        # чистым (бот вправе удалять входящие сообщения в личке).
+        try:
+            await message.delete()
+        except Exception as e:
+            logger.warning("delete contact msg failed: %s", e)
+
     return router
+
+
+async def _send_start_flow(bot: Bot, target: int, bot_db: dict) -> None:
+    """Последовательность ответа на вход в бот.
+
+    Кнопка запуска мини-аппа — в нижнем меню чата (а не инлайн в сообщении).
+    Сообщения уходят сразу подряд:
+      1) «Ответ на /start» (start_msg) — текст;
+      2) «Второе сообщение после /start» (second_msg) — любой контент
+         (напр. эмодзи); пропускается, если поле пустое.
+
+    Кнопку меню ставим персонально для этого чата (с токеном доступа). Если
+    свой веб-сервер не задан (нет MINIAPP_BASE_URL) — кнопку меню не трогаем,
+    её роль играет Main App из BotFather.
+    """
+    start_text = _template_text(
+        bot_db, "start_msg", bot_db.get("welcome_message") or GREETING_TEXT
+    )
+    second_text = _template_text(bot_db, "second_msg", "").strip()
+    label = _template_btn_label(bot_db, OPEN_BUTTON)
+
+    # Кнопка запуска — в нижнее меню чата, не инлайн.
+    await _set_menu_button(bot, target, bot.id, label)
+
+    async def _send(text: str) -> None:
+        try:
+            await bot.send_message(target, text)
+        except Exception as e:
+            logger.warning("send to %s failed: %s", target, e)
+
+    await _send(start_text)          # 1) ответ на /start
+    if second_text:
+        await _send(second_text)     # 2) второе сообщение
 
 
 async def _handle_access(message: Message, bot_db: dict) -> None:
@@ -228,11 +288,7 @@ async def _handle_access(message: Message, bot_db: dict) -> None:
         username=message.from_user.username,
         geo=message.from_user.language_code,  # лучшее доступное приближение гео
     )
-    text = _template_text(
-        bot_db, "start_msg", bot_db.get("welcome_message") or GREETING_TEXT
-    )
-    kb = await _miniapp_button(message.bot.id, _template_btn_label(bot_db, OPEN_BUTTON))
-    await message.answer(text, reply_markup=kb)
+    await _send_start_flow(message.bot, message.chat.id, bot_db)
 
 
 def build_dispatcher() -> Dispatcher:

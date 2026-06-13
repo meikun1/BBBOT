@@ -21,13 +21,23 @@ from aiogram.types import (
     CallbackQuery,
     InlineKeyboardButton,
     InlineKeyboardMarkup,
+    Message,
 )
+
+from aiogram import Bot
+from aiogram.fsm.context import FSMContext
+from aiogram.fsm.state import State, StatesGroup
 
 from database import get_bot
 from directlink_service import get_module
 from handlers.cards import owns
+from handlers.ui import edit_anchor, remember_anchor
 
 router = Router()
+
+
+class DLEdit(StatesGroup):
+    waiting_desc = State()
 
 
 async def _render(callback: CallbackQuery, bot: dict) -> None:
@@ -67,6 +77,14 @@ async def _render(callback: CallbackQuery, bot: dict) -> None:
     kb = InlineKeyboardMarkup(
         inline_keyboard=[
             [InlineKeyboardButton(text=toggle, callback_data=f"dl_toggle:{bot['id']}")],
+            [
+                InlineKeyboardButton(
+                    text="✏️ Описание ссылки", callback_data=f"dl_desc:{bot['id']}"
+                ),
+                InlineKeyboardButton(
+                    text="🖼 Аватар", callback_data=f"dl_avatar:{bot['id']}"
+                ),
+            ],
             [
                 InlineKeyboardButton(
                     text="⬅️ Назад", callback_data=f"settings:{bot['id']}"
@@ -113,3 +131,72 @@ async def toggle_direct_link(callback: CallbackQuery) -> None:
     update_bot_field(bot["id"], "miniapp_enabled", 1 if new_enabled else 0)
     await _render(callback, bot)
     await callback.answer("🟢 Включено" if new_enabled else "🔴 Выключено")
+
+
+# --------------------------------------------- описание прямой ссылки
+@router.callback_query(F.data.startswith("dl_desc:"))
+async def ask_desc(callback: CallbackQuery, state: FSMContext) -> None:
+    bot = get_bot(int(callback.data.split(":")[1]))
+    if not owns(callback.from_user.id, bot):
+        await callback.answer("Бот не найден.", show_alert=True)
+        return
+    await state.set_state(DLEdit.waiting_desc)
+    await state.update_data(bot_id=bot["id"])
+    await remember_anchor(callback, state)
+    await callback.message.edit_text(
+        "✏️ <b>Описание прямой ссылки</b>\n\n"
+        "Пришлите короткое описание (до 120 символов) — оно показывается в "
+        "превью ссылки и в профиле бота.\n\n"
+        "Чтобы очистить — отправьте «-».",
+        reply_markup=InlineKeyboardMarkup(
+            inline_keyboard=[
+                [InlineKeyboardButton(text="⬅️ Отмена", callback_data=f"dl:{bot['id']}")]
+            ]
+        ),
+    )
+    await callback.answer()
+
+
+@router.message(DLEdit.waiting_desc, F.text)
+async def save_desc(message: Message, state: FSMContext) -> None:
+    data = await state.get_data()
+    await state.clear()
+    bot = get_bot(data.get("bot_id"))
+    if not bot:
+        await message.answer("Бот не найден.")
+        return
+    text = message.text.strip()
+    desc = "" if text == "-" else text[:120]
+    child = Bot(token=bot["token"])
+    try:
+        await child.set_my_short_description(short_description=desc)
+        ok, err = True, ""
+    except Exception as e:  # noqa: BLE001
+        ok, err = False, str(e)
+    finally:
+        await child.session.close()
+    note = (
+        "✅ Описание ссылки обновлено."
+        if ok
+        else f"⚠️ Не удалось обновить описание: {err}"
+    )
+    await edit_anchor(
+        message,
+        data,
+        note,
+        InlineKeyboardMarkup(
+            inline_keyboard=[
+                [InlineKeyboardButton(text="🔗 Прямая ссылка", callback_data=f"dl:{bot['id']}")]
+            ]
+        ),
+    )
+
+
+# --------------------------------------------- аватар (только через BotFather)
+@router.callback_query(F.data.startswith("dl_avatar:"))
+async def avatar_info(callback: CallbackQuery) -> None:
+    await callback.answer(
+        "Аватар бота нельзя сменить через бота — только в @BotFather: "
+        "/mybots → выберите бота → Edit Bot → Edit Botpic.",
+        show_alert=True,
+    )

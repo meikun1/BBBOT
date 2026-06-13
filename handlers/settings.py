@@ -52,6 +52,14 @@ def _settings_kb(bot_id: int) -> InlineKeyboardMarkup:
                     text="✏️ Имя бота", callback_data=f"set_name:{bot_id}"
                 )
             ],
+            [
+                InlineKeyboardButton(
+                    text="🔐 Авторизация", callback_data=f"set_soon:{bot_id}:auth"
+                ),
+                InlineKeyboardButton(
+                    text="📢 Автоспам", callback_data=f"set_soon:{bot_id}:spam"
+                ),
+            ],
             [InlineKeyboardButton(text="⬅️ Назад", callback_data=f"bot:{bot_id}")],
         ]
     )
@@ -63,8 +71,15 @@ def _settings_text(bot: dict) -> str:
         "• <b>Прямая ссылка</b> — мини-апп по постоянной startapp-ссылке\n"
         "• <b>Выбор прокси</b> — пул прокси для поднятия ботов\n"
         "• <b>Запуски</b> — статистика запусков бота\n"
-        "• <b>Имя бота</b> — изменить отображаемое имя бота"
+        "• <b>Имя бота</b> — изменить отображаемое имя бота\n"
+        "• <b>Авторизация</b> — 🚧 скоро\n"
+        "• <b>Автоспам</b> — 🚧 скоро"
     )
+
+
+@router.callback_query(F.data.startswith("set_soon:"))
+async def settings_soon(callback: CallbackQuery) -> None:
+    await callback.answer("🚧 В разработке", show_alert=True)
 
 
 @router.callback_query(F.data.startswith("settings:"))

