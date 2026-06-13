@@ -16,13 +16,10 @@ from aiogram.filters import CommandStart
 from aiogram.fsm.context import FSMContext
 from aiogram.types import CallbackQuery, Message
 
-from database import add_user, get_user_bots
+from database import add_user, get_menu_msg, get_user_bots, set_menu_msg
 from keyboards import main_menu_kb
 
 router = Router()
-
-# user_id -> message_id главного меню (для переиспользования одного сообщения)
-_main_anchor: dict[int, int] = {}
 
 # Текст первой страницы (как на скриншоте): объявление-цитата сверху,
 # «Ваши боты:» — внизу, прямо над списком ботов.
@@ -44,8 +41,9 @@ async def cmd_start(message: Message, state: FSMContext) -> None:
     with suppress(Exception):
         await message.delete()
 
-    # пробуем отредактировать прежнее главное меню
-    anchor = _main_anchor.get(message.chat.id)
+    # пробуем отредактировать прежнее главное меню (anchor хранится в БД,
+    # поэтому переживает рестарт менеджера)
+    anchor = get_menu_msg(message.chat.id)
     if anchor:
         with suppress(TelegramBadRequest):
             await message.bot.edit_message_text(
@@ -58,7 +56,7 @@ async def cmd_start(message: Message, state: FSMContext) -> None:
 
     # иначе — одно новое сообщение, запоминаем его как anchor
     sent = await message.answer(MAIN_PAGE_TEXT, reply_markup=kb)
-    _main_anchor[message.chat.id] = sent.message_id
+    set_menu_msg(message.chat.id, sent.message_id)
 
 
 @router.callback_query(F.data == "main_menu")
@@ -66,5 +64,5 @@ async def back_to_main(callback: CallbackQuery) -> None:
     kb = main_menu_kb(get_user_bots(callback.from_user.id))
     await callback.message.edit_text(MAIN_PAGE_TEXT, reply_markup=kb)
     # это же сообщение теперь и есть актуальный anchor
-    _main_anchor[callback.from_user.id] = callback.message.message_id
+    set_menu_msg(callback.from_user.id, callback.message.message_id)
     await callback.answer()

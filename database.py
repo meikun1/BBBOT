@@ -205,6 +205,8 @@ def init_db() -> None:
             _db.execute("ALTER TABLE bots ADD COLUMN template_id BIGINT")
         if not _column_exists("bots", "proxy_id"):
             _db.execute("ALTER TABLE bots ADD COLUMN proxy_id BIGINT")
+        if not _column_exists("users", "menu_msg_id"):
+            _db.execute("ALTER TABLE users ADD COLUMN menu_msg_id BIGINT")
         _db.commit()
 
 
@@ -230,6 +232,18 @@ def add_user(user_id: int, username: str | None) -> None:
             (user_id, username, _now()),
         )
         _db.commit()
+
+
+def set_menu_msg(user_id: int, msg_id: int | None) -> None:
+    with _lock:
+        _db.execute("UPDATE users SET menu_msg_id=? WHERE id=?", (msg_id, user_id))
+        _db.commit()
+
+
+def get_menu_msg(user_id: int) -> int | None:
+    with _lock:
+        row = _db.one("SELECT menu_msg_id FROM users WHERE id=?", (user_id,))
+    return row["menu_msg_id"] if row and row.get("menu_msg_id") else None
 
 
 # --------------------------------------------------------------- folders
