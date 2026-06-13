@@ -66,6 +66,7 @@ router = Router()
 class TemplateEdit(StatesGroup):
     waiting_for_text = State()
     waiting_for_code = State()
+    waiting_for_name = State()  # ввод названия при создании шаблона
 
 
 def _ensure_templates(owner_id: int) -> list[dict]:
@@ -92,7 +93,7 @@ def _menu_kb(bot: dict, templates: list[dict]) -> InlineKeyboardMarkup:
         )
     b.row(
         InlineKeyboardButton(
-            text="⚙️ Создать шаблон", callback_data=f"tpl_soon:{bid}:create"
+            text="⚙️ Создать шаблон", callback_data=f"tpl_create:{bid}"
         ),
         InlineKeyboardButton(
             text="➕ Стандартный шаблон", callback_data=f"tpl_new:{bid}"
@@ -713,6 +714,46 @@ def _resolve_bt(callback: CallbackQuery) -> tuple[int, int, dict] | None:
     if template is None or template["owner_id"] != callback.from_user.id:
         return None
     return bid, tid, template
+
+
+# --------------------------------------------------- создать шаблон (с именем)
+@router.callback_query(F.data.startswith("tpl_create:"))
+async def create_template_start(callback: CallbackQuery, state: FSMContext) -> None:
+    bid = int(callback.data.split(":")[1])
+    bot = get_bot(bid)
+    if not owns(callback.from_user.id, bot):
+        await callback.answer("Бот не найден.", show_alert=True)
+        return
+    await state.set_state(TemplateEdit.waiting_for_name)
+    await state.update_data(bid=bid)
+    await remember_anchor(callback, state)
+    await callback.message.edit_text(
+        "⚙️ <b>Создание шаблона</b>\n\nПришлите название нового шаблона:",
+        reply_markup=InlineKeyboardMarkup(
+            inline_keyboard=[
+                [InlineKeyboardButton(text="⬅️ Отмена", callback_data=f"template:{bid}")]
+            ]
+        ),
+    )
+    await callback.answer()
+
+
+@router.message(TemplateEdit.waiting_for_name, F.text)
+async def create_template_save(message: Message, state: FSMContext) -> None:
+    data = await state.get_data()
+    await state.clear()
+    bid = data.get("bid")
+    name = message.text.strip()[:60] or "Новый шаблон"
+    tid = create_template(message.from_user.id, name, "standard", default_content())
+    if bid:
+        set_bot_template(bid, tid)
+    template = get_template(tid)
+    if template is None:
+        return
+    # открываем редактор только что созданного шаблона
+    await edit_anchor(
+        message, data, _std_text(template), _std_kb(bid, template["id"])
+    )
 
 
 # --------------------------------------------------- добавить по коду
