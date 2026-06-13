@@ -147,18 +147,18 @@ DEFAULT_VIEW = "classic"
 
 # --- готовые фоны-градиенты (без картинок) ---
 # id -> (название с эмодзи, CSS-значение background-image).
-# Подобраны тёмными/насыщенными — под белый текст.
+# Мягкие, приглушённые, средне-тёмные — комфортные для глаз и под белый текст.
 BACKGROUNDS: dict[str, tuple[str, str]] = {
-    "night": ("🌃 Ночь", "linear-gradient(160deg,#0f2027,#203a43,#2c5364)"),
-    "ocean": ("🌊 Океан", "linear-gradient(160deg,#2b5876,#4e4376)"),
-    "sunset": ("🌅 Закат", "linear-gradient(160deg,#3a1c71,#d76d77,#ffaf7b)"),
-    "violet": ("🟣 Фиолет", "linear-gradient(160deg,#41295a,#2f0743)"),
-    "forest": ("🌲 Лес", "linear-gradient(160deg,#134e5e,#71b280)"),
-    "space": ("🌌 Космос", "radial-gradient(circle at 30% 20%,#3a3897,#1a1a2e 60%)"),
-    "graphite": ("🪨 Графит", "linear-gradient(160deg,#232526,#414345)"),
-    "fire": ("🔥 Огонь", "linear-gradient(160deg,#420516,#a40606,#ff512f)"),
-    "mint": ("🌿 Мята", "linear-gradient(160deg,#093028,#237a57)"),
-    "berry": ("🫐 Ягода", "linear-gradient(160deg,#42275a,#734b6d)"),
+    "graphite": ("🪨 Графит", "linear-gradient(160deg,#2b2f36,#454b55)"),
+    "night": ("🌙 Ночь", "linear-gradient(160deg,#1b2735,#2c3e50)"),
+    "indigo": ("🔷 Индиго", "linear-gradient(160deg,#272a45,#434767)"),
+    "teal": ("🌊 Море", "linear-gradient(160deg,#16323b,#27545f)"),
+    "forest": ("🌿 Лес", "linear-gradient(160deg,#1e3a2f,#33564a)"),
+    "plum": ("🟣 Слива", "linear-gradient(160deg,#2d2640,#4a3f63)"),
+    "cocoa": ("🤎 Какао", "linear-gradient(160deg,#2b2522,#473d36)"),
+    "fog": ("🌫 Туман", "linear-gradient(160deg,#2f3439,#4a525c)"),
+    "mauve": ("🌸 Лаванда", "linear-gradient(160deg,#352b40,#574a5c)"),
+    "ocean": ("🐬 Океан", "linear-gradient(160deg,#15323d,#28525f)"),
 }
 
 
@@ -174,7 +174,9 @@ def background_css(value: str | None) -> str:
         return BACKGROUNDS[value][1]
     if "gradient(" in value:
         return value
-    return f"url('{value}')"
+    if value.startswith(("http://", "https://", "data:", "//")):
+        return f"url('{value}')"
+    return ""  # неизвестный токен (напр. удалённый id пресета) — без фона
 
 
 def page_field_key(page: str, field: str) -> str:
