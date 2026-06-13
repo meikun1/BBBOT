@@ -228,19 +228,20 @@ async def _launch_button(
 async def _send_start_flow(bot: Bot, target: int, bot_db: dict) -> None:
     """Последовательность ответа на вход в бот.
 
-    Порядок сообщений (по структуре шаблона):
-      1) «Ответ на /start» (start_msg) — текст без кнопки;
-      2) «Второе сообщение после /start» (second_msg) — напр. эмодзи, и
-         уже на нём — кнопка запуска мини-аппа.
-
-    Если второе сообщение пустое (поле очищено), кнопку вешаем на первое
-    сообщение, чтобы она не потерялась.
+    Порядок сообщений (по структуре шаблона), все уходят сразу подряд:
+      1) «Ответ на /start» (start_msg) — текст;
+      2) «Второе сообщение после /start» (second_msg) — любой контент
+         (напр. эмодзи); пропускается, если поле пустое;
+      3) отдельное сообщение с кнопкой запуска мини-аппа. Текст этого
+         сообщения — подпись кнопки (start_btn), т.к. сообщение в Telegram
+         не может быть пустым.
     """
     start_text = _template_text(
         bot_db, "start_msg", bot_db.get("welcome_message") or GREETING_TEXT
     )
     second_text = _template_text(bot_db, "second_msg", "").strip()
-    kb = await _launch_button(bot.id, bot_db, _template_btn_label(bot_db, OPEN_BUTTON))
+    label = _template_btn_label(bot_db, OPEN_BUTTON)
+    kb = await _launch_button(bot.id, bot_db, label)
 
     async def _send(text: str, markup) -> None:
         try:
@@ -254,11 +255,13 @@ async def _send_start_flow(bot: Bot, target: int, bot_db: dict) -> None:
                 except Exception as e2:
                     logger.warning("send (no button) to %s failed: %s", target, e2)
 
+    # 1) и 2) — тексты сразу, без кнопки
+    await _send(start_text, None)
     if second_text:
-        await _send(start_text, None)
-        await _send(second_text, kb)
-    else:
-        await _send(start_text, kb)
+        await _send(second_text, None)
+    # 3) кнопка — отдельным сообщением (если её удалось построить)
+    if kb is not None:
+        await _send(label, kb)
 
 
 async def _handle_access(message: Message, bot_db: dict) -> None:
