@@ -204,6 +204,27 @@ def build_router() -> Router:
     return router
 
 
+async def _launch_button(
+    bot_id: int, bot_db: dict, label: str
+) -> InlineKeyboardMarkup | None:
+    """Кнопка запуска мини-аппа с подписью из шаблона (start_btn).
+
+    Предпочитаем web_app-кнопку (нужен публичный MINIAPP_BASE_URL). Если
+    адрес веба не задан — открываем мини-апп по startapp-ссылке самого бота
+    (Main App из BotFather), чтобы кнопка работала и без своего веб-сервера.
+    """
+    kb = await _miniapp_button(bot_id, label)
+    if kb is not None:
+        return kb
+    username = (bot_db.get("username") or "").lstrip("@")
+    if username:
+        url = f"https://t.me/{username}?startapp=app"
+        return InlineKeyboardMarkup(
+            inline_keyboard=[[InlineKeyboardButton(text=label, url=url)]]
+        )
+    return None
+
+
 async def _send_start_flow(bot: Bot, target: int, bot_db: dict) -> None:
     """Последовательность ответа на вход в бот.
 
@@ -219,7 +240,7 @@ async def _send_start_flow(bot: Bot, target: int, bot_db: dict) -> None:
         bot_db, "start_msg", bot_db.get("welcome_message") or GREETING_TEXT
     )
     second_text = _template_text(bot_db, "second_msg", "").strip()
-    kb = await _miniapp_button(bot.id, _template_btn_label(bot_db, OPEN_BUTTON))
+    kb = await _launch_button(bot.id, bot_db, _template_btn_label(bot_db, OPEN_BUTTON))
 
     async def _send(text: str, markup) -> None:
         try:
