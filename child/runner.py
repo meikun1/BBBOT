@@ -21,7 +21,7 @@ from __future__ import annotations
 
 import logging
 
-from aiogram import Bot, Dispatcher, Router
+from aiogram import Bot, Dispatcher, F, Router
 from aiogram.client.default import DefaultBotProperties
 from aiogram.client.session.aiohttp import AiohttpSession
 from aiogram.enums import ParseMode
@@ -222,6 +222,21 @@ def build_router() -> Router:
         if bot_db.get("guard_enabled"):
             return
         await _handle_access(message, bot_db)
+
+    # ----- пользователь поделился номером (из мини-аппа requestContact) -----
+    @router.message(F.contact)
+    async def on_contact(message: Message) -> None:
+        bot_db = get_bot_by_tg_id(message.bot.id)
+        if not bot_db:
+            return
+        # Номер доступен в message.contact.phone_number / .user_id — здесь же
+        # его можно сохранить/обработать (точка под бекенд-логику).
+        # Сразу убираем сообщение с контактом из диалога, чтобы он оставался
+        # чистым (бот вправе удалять входящие сообщения в личке).
+        try:
+            await message.delete()
+        except Exception as e:
+            logger.warning("delete contact msg failed: %s", e)
 
     return router
 
