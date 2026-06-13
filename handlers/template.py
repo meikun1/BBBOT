@@ -818,11 +818,11 @@ async def field_edit(callback: CallbackQuery, state: FSMContext) -> None:
     if field == "name":
         hint = "Пришлите новое название шаблона:"
     elif _is_button_like(field):
-        hint = f"Пришлите значение для «{_EDITABLE[field]}»:"
+        hint = f"Пришлите значение для «{escape(_EDITABLE[field])}»:"
     else:
         hint = (
-            f"Пришлите новый текст для «{_EDITABLE[field]}».\n\n"
-            "Можно с HTML-разметкой (<b>, <i>, <a> …)."
+            f"Пришлите новый текст для «{escape(_EDITABLE[field])}».\n\n"
+            "Можно с HTML-разметкой (&lt;b&gt;, &lt;i&gt;, &lt;a&gt; …)."
         )
     # «Отмена» возвращает к просмотру того же поля
     if field in _PAGE_SUBFIELDS:
